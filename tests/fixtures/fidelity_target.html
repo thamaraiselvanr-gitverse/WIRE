@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <style>
+        :root {
+            --brand-color: #ff0000;
+            --fallback: #000000;
+        }
+        body {
+            font-family: Arial, sans-serif;
+            color: #333333;
+            margin: 0;
+            padding: 10px;
+        }
+        /* Specificity conflict: ID vs Class vs Tag */
+        div {
+            background-color: #cccccc;
+        }
+        .box {
+            background-color: #bbbbbb; 
+            padding: 20px;
+            color: var(--brand-color, #000000);
+        }
+        #special-box {
+            background-color: var(--unknown, #444444);
+            margin: 15px;
+        }
+
+        /* Source Order logic: .box should override div, and .box is overridden by later rules if exact spec */
+        .box.extra {
+            background-color: #aaaaaa;
+        }
+
+        /* Test pseudo classes structural */
+        ul li:first-child {
+            font-weight: bold;
+        }
+
+    </style>
+</head>
+<body>
+    <div id="wrapper">
+        <div class="box" id="special-box">
+            <span>Nested inherited text</span>
+            <p style="color: #ffffff;">Inline style text</p>
+        </div>
+        <div class="box extra">
+            <ul>
+                <li id="list-1">Item 1</li>
+                <li>Item 2</li>
+            </ul>
+        </div>
+    </div>
+</body>
+</html>

@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <style>
+        body { font-family: sans-serif; background: #fff; margin: 20px; }
+        
+        /* Valid Meaningful Diff: Changes layout color distinctly */
+        .btn-target {
+            background-color: rgb(0, 0, 0); 
+            color: #fff;
+            padding: 10px 20px;
+            display: inline-block;
+            transition: all 0.3s;
+            cursor: pointer;
+        }
+        .btn-target:hover {
+            background-color: rgb(255, 0, 0);
+            box-shadow: 0px 4px 8px rgba(0,0,0,0.5);
+        }
+
+        /* Meaningless Diff: Should be filtered. RGBA/Hex exact parity */
+        .link-noise {
+            color: #000000;
+        }
+        .link-noise:hover {
+            color: rgba(0, 0, 0, 1);
+        }
+
+        /* Combinatorial Trap: Contains 60 buttons. The system should cap out at 50, refusing to crash. */
+        .container {
+            margin-top: 50px;
+        }
+        .explosion-btn {
+            background: blue; padding: 2px; border: 1px solid black; cursor: pointer;
+        }
+        .explosion-btn:hover {
+            background: green;
+        }
+    </style>
+</head>
+<body>
+    <h1>Interaction Validation Baseline</h1>
+    
+    <div id="valid-group">
+        <a class="btn-target" href="#">Meaningful Hover</a>
+    </div>
+
+    <div id="noise-group">
+        <a class="link-noise" href="#">Non-Meaningful Noise Hover</a>
+    </div>
+
+    <div id="explosion-group" class="container">
+        <!-- JS will populate 60 buttons here -->
+    </div>
+
+    <script>
+        const container = document.getElementById("explosion-group");
+        for (let i = 0; i < 60; i++) {
+            let btn = document.createElement("a");
+            btn.className = "explosion-btn";
+            btn.href = "#";
+            btn.innerText = "Btn " + i;
+            container.appendChild(btn);
+        }
+    </script>
+</body>
+</html>

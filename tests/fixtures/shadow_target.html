@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Shadow DOM Test Target</title>
+</head>
+<body>
+    <div id="container">
+        <my-element id="host1"></my-element>
+        <closed-element id="host2"></closed-element>
+    </div>
+
+    <script>
+        class MyElement extends HTMLElement {
+            constructor() {
+                super();
+                const shadow = this.attachShadow({ mode: 'open' });
+                
+                const style = document.createElement('style');
+                style.textContent = `
+                    .shadow-box {
+                        color: rgb(255, 0, 0);
+                        background-color: rgb(0, 255, 0);
+                        margin: 10px;
+                    }
+                    span {
+                        font-size: 16px;
+                    }
+                `;
+                shadow.appendChild(style);
+
+                const div = document.createElement('div');
+                div.className = 'shadow-box';
+                div.innerHTML = '<span>Hello from host1</span>';
+                
+                const nested = document.createElement('nested-element');
+                nested.id = 'nested1';
+                div.appendChild(nested);
+
+                shadow.appendChild(div);
+            }
+        }
+        customElements.define('my-element', MyElement);
+
+        class NestedElement extends HTMLElement {
+            constructor() {
+                super();
+                const shadow = this.attachShadow({ mode: 'open' });
+                
+                const sheet = new CSSStyleSheet();
+                sheet.replaceSync(`
+                    p {
+                        color: rgb(0, 0, 255);
+                        padding: 5px;
+                    }
+                `);
+                shadow.adoptedStyleSheets = [sheet];
+
+                const p = document.createElement('p');
+                p.textContent = 'Nested Shadow Content';
+                shadow.appendChild(p);
+            }
+        }
+        customElements.define('nested-element', NestedElement);
+
+        class ClosedElement extends HTMLElement {
+            constructor() {
+                super();
+                const shadow = this.attachShadow({ mode: 'closed' });
+                const div = document.createElement('div');
+                div.style.color = 'rgb(0, 128, 0)';
+                div.textContent = 'Closed Shadow Content';
+                shadow.appendChild(div);
+            }
+        }
+        customElements.define('closed-element', ClosedElement);
+    </script>
+</body>
+</html>

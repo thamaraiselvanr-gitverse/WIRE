@@ -1,0 +1,30 @@
+# Phase 4 Execution Checklist
+
+- `[x]` 1. **Schema & CIDS Tree Extension**
+  - `[x]` Update `ComponentNode` in `wire/schema/canonical.py` with `shadow_root: Optional[ComponentNode]` and `style_provenance: Optional[str]`.
+  - `[x]` Rebuild Pydantic models.
+  - `[x]` Modify `HTMLToCidsParser` to accept and integrate `shadow_roots_map` during BeautifulSoup parsing.
+- `[x]` 2. **Deep Observation & Browser Layers**
+  - `[x]` Implement `wait_for_dom_stability` in `wire/agents/observation/browser_session.py`.
+  - `[x]` Refactor `wire/agents/observation/shadow_piercer.py` to recursively extract shadow DOM structures.
+  - `[x]` Implement authored style sheet extraction (`<style>` tags and `adoptedStyleSheets`) and scoped cascade resolution inside shadow roots.
+  - `[x]` Assign `style_provenance` as `"cascade_resolved"` (for authored CSS) or `"computed_fallback"` (for closed roots or inaccessible styles).
+- `[x]` 3. **Orchestration & Network Monitor**
+  - `[x]` Integrate SPA check and wait loop in `wire/orchestrator/execution_router.py`.
+  - `[x]` Retrieve shadow content, convert to CIDS ComponentNodes, build `shadow_roots_map` by host path, and pass to parser.
+  - `[x]` Capture discovered API endpoints from `network_monitor` and save as `api_discovery_blueprint.json`.
+- `[x]` 4. **Input Blueprint & Validation**
+  - `[x]` Update `SlotConstraint` and `DataSlot` in `wire/schema/input_blueprint.py` to support required fields.
+  - `[x]` Implement `validate_input(self, slot_id: str, value: Any, strict: bool = True)` with dual-mode (hard vs soft) validation logic returning structured results.
+  - `[x]` Implement validation summary report helper separating hard failures from soft warnings.
+- `[x]` 5. **Synthesis & Knowledge Index**
+  - `[x]` Enhance `query()` in `wire/synthesis/knowledge_index.py` for token matches, color similarity, and patterns.
+  - `[x]` Update `wire/synthesis/prompt_generator.py` for structured code reconstruction prompts.
+- `[x]` 6. **Testing and Verification**
+  - `[x]` Create `tests/test_phase4.py` test suite covering:
+    - DOM stability waiting.
+    - Shadow DOM recursive extraction, authored rules vs computed fallback, and `style_provenance` verification.
+    - Cascade/shadow DOM coexistence boundary test.
+    - Dual-mode input validation (hard failures vs soft warnings).
+    - Network monitor API discovery and blueprint outputs.
+  - `[x]` Run full test suite and confirm 100% pass.
