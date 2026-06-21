@@ -50,6 +50,12 @@ from wire.schema.layout_schema import RemovalPlan, ReflowAction, IntegrityReport
 from wire.layout.section_removal_planner import SectionRemovalPlanner
 from wire.layout.layout_reflow_engine import LayoutReflowEngine
 from wire.layout.structural_integrity_validator import StructuralIntegrityValidator
+from wire.schema.submission_schema import SubmissionPayload, SubmissionResult, ValidationSummary, ValidationItem, ImageValue, RepeatableGroupValue
+from wire.generation.submission_validator import SubmissionValidator
+from wire.generation.image_ingestion import ImageIngestionPipeline
+from wire.generation.substitution_mapper import SubstitutionMapper
+from wire.generation.transformation_prompt_generator import TransformationPromptGenerator
+
 
 logger = structlog.get_logger(__name__)
 
@@ -599,4 +605,136 @@ class ExecutionRouter:
             integrity_report=final_report,
             recompilation_triggered=True,
         )
+
+    def generate_transformation_prompt(
+        self, run_id: str, payload: SubmissionPayload
+    ) -> SubmissionResult:
+        """
+        Phase 9 content substitution API.
+        Validates submission, ingests user image uploads, maps substitutions,
+        and generates a transformation prompt stored as transformation_prompt.json.
+        """
+        logger.info("generate_transformation_prompt_started", run_id=run_id)
+
+        # 1. Resolve run directory
+        run_dir = os.path.join(self.storage.base_dir, run_id)
+        if not os.path.exists(run_dir):
+            raise ValueError(f"Run directory not found: {run_dir}")
+
+        cids_path = os.path.join(run_dir, "schema_cids.json")
+        if not os.path.exists(cids_path):
+            raise ValueError(f"CIDS schema not found: {cids_path}")
+
+        blueprint_path = os.path.join(run_dir, "schema_blueprint.json")
+        if not os.path.exists(blueprint_path):
+            raise ValueError(f"Blueprint schema not found: {blueprint_path}")
+
+        form_schema_path = os.path.join(run_dir, "website_form_schema.json")
+        if not os.path.exists(form_schema_path):
+            # Fallback to portfolio_form_schema.json
+            form_schema_path = os.path.join(run_dir, "portfolio_form_schema.json")
+            if not os.path.exists(form_schema_path):
+                raise ValueError("No form schema found in run directory.")
+
+        # Load CIDS tree
+        with open(cids_path, "r", encoding="utf-8") as f:
+            cids_data = json.load(f)
+        cids = CanonicalDesignSchema.model_validate(cids_data)
+
+        # Load Blueprint
+        with open(blueprint_path, "r", encoding="utf-8") as f:
+            blueprint_data = json.load(f)
+        blueprint = InputBlueprint.model_validate(blueprint_data)
+
+        # Load Form Schema
+        with open(form_schema_path, "r", encoding="utf-8") as f:
+            form_schema_data = json.load(f)
+        
+        # Determine Pydantic class to validate
+        from wire.schema.semantic_schema import WebsiteFormSchema
+        from wire.schema.portfolio_schema import PortfolioFormSchema
+        if "portfolio_form_schema" in form_schema_path:
+            form_schema = PortfolioFormSchema.model_validate(form_schema_data)
+        else:
+            form_schema = WebsiteFormSchema.model_validate(form_schema_data)
+
+        # 2. Strict validation (hard block on failures)
+        validation_report = SubmissionValidator.validate(payload, form_schema, blueprint)
+        if not validation_report.is_valid:
+            logger.warning("generate_transformation_prompt_validation_failed", errors=len(validation_report.hard_failures))
+            return SubmissionResult(
+                success=False,
+                validation_report=validation_report,
+                transformation_prompt=None
+            )
+
+        # 3. Image Ingestion (decode, verify, Pillow re-encode, store)
+        assets_dir = os.path.join(run_dir, "assets")
+        try:
+            for field_id, submitted_val in payload.field_values.items():
+                if isinstance(submitted_val, ImageValue) and submitted_val.value:
+                    processed = ImageIngestionPipeline.process(
+                        submitted_val.value,
+                        assets_dir
+                    )
+                    # Update in-place to the relative reference path
+                    submitted_val.value = processed["stored_path"]
+                elif isinstance(submitted_val, RepeatableGroupValue):
+                    for instance in submitted_val.instances:
+                        for f_id, val in instance.items():
+                            if isinstance(val, ImageValue) and val.value:
+                                processed = ImageIngestionPipeline.process(
+                                    val.value,
+                                    assets_dir
+                                )
+                                val.value = processed["stored_path"]
+        except Exception as e:
+            logger.error("image_ingestion_failed_during_substitution", error=str(e))
+            # Fail closed on ingestion failure
+            validation_report.is_valid = False
+            validation_report.hard_failures.append(
+                ValidationItem(field_id="image_ingestion", message=f"Image ingestion processing failed: {str(e)}")
+            )
+            return SubmissionResult(
+                success=False,
+                validation_report=validation_report,
+                transformation_prompt=None
+            )
+
+        # 4. Substitution Mapping
+        substitutions = SubstitutionMapper.map(cids.root, payload, form_schema)
+
+        # Load design tokens to pass to generator for prompt context
+        design_tokens = {}
+        design_arch_path = os.path.join(run_dir, "design_architecture.json")
+        if os.path.exists(design_arch_path):
+            try:
+                with open(design_arch_path, "r", encoding="utf-8") as f:
+                    design_tokens = json.load(f)
+            except Exception:
+                pass
+
+        # 5. Transformation Prompt Generation (call LLM summarizing only)
+        self._llm_guard.reset_call_count()
+        
+        prompt = TransformationPromptGenerator.generate(
+            cids.root,
+            substitutions,
+            cids.url,
+            self._llm_guard,
+            design_tokens
+        )
+
+        # 6. Save prompt output to run directory
+        prompt_output_path = os.path.join(run_dir, "transformation_prompt.json")
+        with open(prompt_output_path, "w", encoding="utf-8") as f:
+            f.write(prompt.model_dump_json(indent=2))
+
+        logger.info("generate_transformation_prompt_completed_successfully", run_id=run_id)
+        return SubmissionResult(
+            success=True,
+            validation_report=validation_report,
+            transformation_prompt=prompt
+        )
+
 
