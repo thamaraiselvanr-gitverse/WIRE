@@ -439,31 +439,48 @@ async def test_shadow_dom_visual_fidelity(shadow_fixture_url):
             
         recon_url = "file:///" + os.path.abspath(recon_path).replace("\\", "/")
         
-        # 2. Capture screenshots of isolated shadow-rendered region (#host1)
-        # Original page screenshot
+        # 2. Capture screenshots of isolated shadow-rendered regions (#host1 and #host2)
+        # Original page screenshots
         await page.goto(shadow_fixture_url, wait_until="networkidle")
         host1 = await page.query_selector("#host1")
         bbox1 = await host1.bounding_box()
         orig_img_path = os.path.join(out_dir, "shadow_original_host1.png")
         await page.screenshot(path=orig_img_path, clip=bbox1)
+
+        host2_orig = await page.query_selector("#host2")
+        bbox2_orig = await host2_orig.bounding_box()
+        orig_img_path_host2 = os.path.join(out_dir, "shadow_original_host2.png")
+        await page.screenshot(path=orig_img_path_host2, clip=bbox2_orig)
         
-        # Reconstructed page screenshot
+        # Reconstructed page screenshots
         await page.goto(recon_url, wait_until="networkidle")
         # Give Declarative Shadow DOM time to render
         await page.wait_for_timeout(500)
-        host2 = await page.query_selector("#host1")
-        bbox2 = await host2.bounding_box()
+        host1_recon = await page.query_selector("#host1")
+        bbox1_recon = await host1_recon.bounding_box()
         recon_img_path = os.path.join(out_dir, "shadow_reconstructed_host1.png")
-        await page.screenshot(path=recon_img_path, clip=bbox2)
+        await page.screenshot(path=recon_img_path, clip=bbox1_recon)
+
+        host2_recon = await page.query_selector("#host2")
+        bbox2_recon = await host2_recon.bounding_box()
+        recon_img_path_host2 = os.path.join(out_dir, "shadow_reconstructed_host2.png")
+        await page.screenshot(path=recon_img_path_host2, clip=bbox2_recon)
         
         # 3. Run visual diff
         from wire.validation.visual_diff import VisualDiff
         diff_engine = VisualDiff()
+        
+        # Verify host1 (open shadow root)
         result = diff_engine.compare_screenshots(orig_img_path, recon_img_path)
         similarity = result["similarity_percent"]
-        
-        print(f"\n--- SHADOW DOM VISUAL FIDELITY: {similarity}% ---")
-        assert similarity >= 95.0, f"Shadow DOM visual fidelity ({similarity}%) is below 95% threshold"
+        print(f"\n--- OPEN SHADOW DOM VISUAL FIDELITY: {similarity}% ---")
+        assert similarity >= 95.0, f"Open Shadow DOM visual fidelity ({similarity}%) is below 95% threshold"
+
+        # Verify host2 (closed shadow root, computed fallback)
+        result_host2 = diff_engine.compare_screenshots(orig_img_path_host2, recon_img_path_host2)
+        similarity_host2 = result_host2["similarity_percent"]
+        print(f"\n--- CLOSED SHADOW DOM VISUAL FIDELITY: {similarity_host2}% ---")
+        assert similarity_host2 >= 95.0, f"Closed Shadow DOM visual fidelity ({similarity_host2}%) is below 95% threshold"
         
     finally:
         await page.close()
