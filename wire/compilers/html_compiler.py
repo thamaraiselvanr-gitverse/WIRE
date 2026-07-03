@@ -9,6 +9,52 @@ logger = structlog.get_logger(__name__)
 
 class HTMLCompiler:
     def compile(self, cids: CanonicalDesignSchema, injected_data: dict = None) -> str:
+        """Compile the CIDS tree to an HTML body fragment prefixed with a
+        <style> block for any non-inline (responsive/pseudo/global) rules."""
+        body, css = self._compile_parts(cids, injected_data)
+        style_block = f"<style>\n{css}\n</style>" if css else ""
+        return style_block + body
+
+    def compile_document(
+        self,
+        cids: CanonicalDesignSchema,
+        injected_data: dict = None,
+        title: str = None,
+    ) -> str:
+        """Compile the CIDS tree to a complete, standalone HTML5 document with a
+        proper <head> carrying the generated stylesheet (webfonts, animations,
+        breakpoints, interaction states) so the editable reconstruction opens
+        faithfully on its own."""
+        body, css = self._compile_parts(cids, injected_data, unwrap_root=True)
+        doc_title = title or cids.url or "WIRE reconstruction"
+        head_parts = [
+            '<meta charset="utf-8">',
+            '<meta name="viewport" content="width=device-width, initial-scale=1">',
+            f"<title>{doc_title}</title>",
+        ]
+        if css:
+            head_parts.append(f"<style>\n{css}\n</style>")
+        head = "\n".join(head_parts)
+        return (
+            "<!doctype html>\n"
+            '<html lang="en">\n'
+            f"<head>\n{head}\n</head>\n"
+            f"<body>\n{body}\n</body>\n"
+            "</html>\n"
+        )
+
+    def _compile_parts(
+        self,
+        cids: CanonicalDesignSchema,
+        injected_data: dict = None,
+        unwrap_root: bool = False,
+    ) -> tuple[str, str]:
+        """Render the body HTML and the generated CSS text (no <style> tag).
+
+        When ``unwrap_root`` is set and the CIDS root is an ``<html>``/``<body>``
+        wrapper, its inner content is rendered directly so a document build does
+        not nest a second ``<body>`` inside its own.
+        """
         logger.info("compiling_cids_to_html", url=cids.url)
         injected_data = injected_data or {}
 
@@ -123,9 +169,15 @@ class HTMLCompiler:
 
             return f"<{node.tag}{attrs}>{content}{children_str}</{node.tag}>"
 
-        body = render_node(cids.root)
+        if unwrap_root and cids.root.tag in ("html", "body"):
+            target = cids.root
+            if target.tag == "html":
+                target = next((c for c in target.children if c.tag == "body"), target)
+            body = "".join(render_node(c) for c in target.children)
+        else:
+            body = render_node(cids.root)
+
         css = render_css(
             getattr(cids, "global_styles", []), pseudo_rules, responsive_rules
         )
-        style_block = f"<style>\n{css}\n</style>" if css else ""
-        return style_block + body
+        return body, css

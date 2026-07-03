@@ -479,6 +479,15 @@ class ExecutionRouter:
             ) as f:
                 f.write(blueprint.model_dump_json(indent=2))
 
+            # ── Editable HTML reconstruction (full standalone document) ──
+            editable_html = self.html_compiler.compile_document(cids)
+            with open(
+                os.path.join(self.storage.current_run_dir, "output_editable.html"),
+                "w",
+                encoding="utf-8",
+            ) as f:
+                f.write(editable_html)
+
             # ── Phase 5: Framework adapter compilation ──
             react_output = self.react_adapter.compile(cids)
             with open(
