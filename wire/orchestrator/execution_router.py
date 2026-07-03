@@ -24,7 +24,12 @@ from wire.orchestrator.coordinator import Coordinator
 from wire.orchestrator.checkpointing import CheckpointManager
 from wire.orchestrator.semantic_merger import SemanticMerger
 from wire.orchestrator.consensus import ConsensusValidator
-from wire.schema.canonical import CanonicalDesignSchema, ComponentNode, DesignTokens, HTMLToCidsParser
+from wire.schema.canonical import (
+    CanonicalDesignSchema,
+    ComponentNode,
+    DesignTokens,
+    HTMLToCidsParser,
+)
 from wire.schema.style_mapper import CascadeResolver
 from wire.schema.input_blueprint import InputBlueprint, DataSlot, SlotConstraint
 from wire.compilers.html_compiler import HTMLCompiler
@@ -46,16 +51,30 @@ from wire.semantic.placeholder_detector import PlaceholderDetector
 from wire.semantic.form_schema_compiler import FormSchemaCompiler
 from wire.semantic.intent_reconciler import IntentReconciler
 from wire.semantic.profiles.portfolio_profile import PortfolioProfile
-from wire.schema.layout_schema import RemovalPlan, ReflowAction, IntegrityReport, RemovalResult
+from wire.schema.layout_schema import (
+    RemovalPlan,
+    ReflowAction,
+    IntegrityReport,
+    IntegrityViolation,
+    RemovalResult,
+)
 from wire.layout.section_removal_planner import SectionRemovalPlanner
 from wire.layout.layout_reflow_engine import LayoutReflowEngine
 from wire.layout.structural_integrity_validator import StructuralIntegrityValidator
-from wire.schema.submission_schema import SubmissionPayload, SubmissionResult, ValidationSummary, ValidationItem, ImageValue, RepeatableGroupValue
+from wire.schema.submission_schema import (
+    SubmissionPayload,
+    SubmissionResult,
+    ValidationSummary,
+    ValidationItem,
+    ImageValue,
+    RepeatableGroupValue,
+)
 from wire.generation.submission_validator import SubmissionValidator
 from wire.generation.image_ingestion import ImageIngestionPipeline
 from wire.generation.substitution_mapper import SubstitutionMapper
-from wire.generation.transformation_prompt_generator import TransformationPromptGenerator
-
+from wire.generation.transformation_prompt_generator import (
+    TransformationPromptGenerator,
+)
 
 logger = structlog.get_logger(__name__)
 
@@ -110,6 +129,7 @@ class ExecutionRouter:
 
         # Phase 7 — Semantic Interpretation Layer
         from wire.semantic.llm_client import LLMClient
+
         self._llm_client = LLMClient()
         self._llm_guard = LLMGuard(llm_client=self._llm_client)
         self._section_classifier = SectionClassifier(self._llm_guard)
@@ -128,6 +148,11 @@ class ExecutionRouter:
         self.domain_profile: Optional[str] = None
         self.intent_prompt: Optional[str] = None
 
+        # Accuracy config flags
+        # Off by default to preserve existing single-page pipeline behavior;
+        # set True to crawl and reconstruct the full same-domain site map.
+        self.enable_multi_page_crawl: bool = False
+
     async def execute_pipeline(self, url: str) -> float:
         logger.info("executing_full_pipeline", url=url)
 
@@ -145,7 +170,9 @@ class ExecutionRouter:
         self._save_json("compliance_report.json", legal_result)
 
         # ── Phase 1: Crawl ──
-        pages = await self.crawler.crawl(url, single_page=True)
+        pages = await self.crawler.crawl(
+            url, single_page=not self.enable_multi_page_crawl
+        )
 
         await self.browser.start()
         partial_results = []
@@ -160,7 +187,9 @@ class ExecutionRouter:
                 state = self.checkpoint.mark_page_done(state, page_url)
 
         except Exception as e:
-            self.scorer.log_critical_error("Pipeline execution failed", {"error": str(e)})
+            self.scorer.log_critical_error(
+                "Pipeline execution failed", {"error": str(e)}
+            )
             raise
         finally:
             await self.browser.stop()
@@ -179,7 +208,9 @@ class ExecutionRouter:
         self._run_template_ecosystem(url, template_id)
 
         # ── Phase 6: Package .wire artifact ──
-        artifact_path = os.path.join(self.storage.current_run_dir, f"{template_id}.wire")
+        artifact_path = os.path.join(
+            self.storage.current_run_dir, f"{template_id}.wire"
+        )
         WireArtifact.package(self.storage.current_run_dir, artifact_path, {"url": url})
         verify_result = WireArtifact.verify(artifact_path)
         self._save_json("artifact_verification.json", verify_result)
@@ -192,7 +223,12 @@ class ExecutionRouter:
         return score
 
     async def _process_page(self, page_url: str, state: dict) -> dict:
-        result: Dict[str, Any] = {"page": page_url, "assets": [], "interactions": [], "errors": []}
+        result: Dict[str, Any] = {
+            "page": page_url,
+            "assets": [],
+            "interactions": [],
+            "errors": [],
+        }
 
         page_lock = f"lock:page:{page_url}"
         if not self.coordinator.acquire_lock(page_lock):
@@ -203,7 +239,9 @@ class ExecutionRouter:
             # ── Phase 1: Capture ──
             content = await self.browser.capture_page(page_url)
             if not content:
-                self.scorer.log_critical_error("Failed to capture page content", {"url": page_url})
+                self.scorer.log_critical_error(
+                    "Failed to capture page content", {"url": page_url}
+                )
                 return result
             original_content = content
 
@@ -222,12 +260,19 @@ class ExecutionRouter:
                     for fname in files:
                         if fname.endswith(".css"):
                             try:
-                                with open(os.path.join(root, fname), "r", encoding="utf-8", errors="ignore") as f:
+                                with open(
+                                    os.path.join(root, fname),
+                                    "r",
+                                    encoding="utf-8",
+                                    errors="ignore",
+                                ) as f:
                                     css_content_agg += "\n" + f.read()
                             except Exception:
                                 pass
 
-            design_tokens = self.design_analyzer.extract_design_architecture(rewritten_content, css_content_agg)
+            design_tokens = self.design_analyzer.extract_design_architecture(
+                rewritten_content, css_content_agg
+            )
             self._save_json("design_architecture.json", design_tokens)
 
             # Open a live page for interactive work
@@ -253,13 +298,13 @@ class ExecutionRouter:
             # ── Phase 4: Network report ──
             network_report = self.network_monitor.get_report()
             self._save_json("network_report.json", network_report)
-            
+
             # Save API discovery blueprint
             api_endpoints = network_report.get("api_endpoints", [])
-            self._save_json("api_discovery_blueprint.json", {
-                "url": page_url,
-                "api_endpoints_discovered": api_endpoints
-            })
+            self._save_json(
+                "api_discovery_blueprint.json",
+                {"url": page_url, "api_endpoints_discovered": api_endpoints},
+            )
 
             # ── Phase 2: Viewport captures ──
             viewport_results = await self.viewport_renderer.capture_viewports(
@@ -273,7 +318,9 @@ class ExecutionRouter:
 
             # ── Phase 3: Interaction recording ──
             hover_records = await self.interaction_recorder.record_hover_states(
-                page_obj, fuzz_results.get("hoverable", []), self.storage.get_asset_path()
+                page_obj,
+                fuzz_results.get("hoverable", []),
+                self.storage.get_asset_path(),
             )
             result["interactions"] = hover_records
             self._save_json("interaction_catalogue.json", hover_records)
@@ -288,7 +335,9 @@ class ExecutionRouter:
             renders = []
             for _ in range(3):
                 render_page = await self.browser.context.new_page()
-                await render_page.goto(page_url, wait_until="networkidle", timeout=30000)
+                await render_page.goto(
+                    page_url, wait_until="networkidle", timeout=30000
+                )
                 render_bytes = await render_page.screenshot(full_page=True)
                 renders.append(render_bytes)
                 await render_page.close()
@@ -299,8 +348,12 @@ class ExecutionRouter:
 
             # ── Phase 2.5: Cascade Resolution ──
             resolver = CascadeResolver()
-            soup_with_cascade, styles_map = resolver.resolve(rewritten_content, css_content_agg)
-            self._save_json("cascade_styles_map.json", {str(k): v for k, v in styles_map.items()})
+            soup_with_cascade, styles_map = resolver.resolve(
+                rewritten_content, css_content_agg
+            )
+            self._save_json(
+                "cascade_styles_map.json", {str(k): v for k, v in styles_map.items()}
+            )
 
             # Map captured interactions back to BeautifulSoup node objects
             interactions_map = {}
@@ -311,19 +364,30 @@ class ExecutionRouter:
                         try:
                             el = soup_with_cascade.select_one(path)
                             if el:
-                                interactions_map[id(el)] = {"hover": rec.get("style_diff", {})}
+                                interactions_map[id(el)] = {
+                                    "hover": rec.get("style_diff", {})
+                                }
                         except Exception as parse_error:
-                            logger.warning("interaction_mapping_failed", path=path, error=str(parse_error))
+                            logger.warning(
+                                "interaction_mapping_failed",
+                                path=path,
+                                error=str(parse_error),
+                            )
 
             # Map shadow DOM structures
             shadow_roots_map = {}
             if shadow_content:
                 try:
+
                     def dict_to_node(d: dict) -> ComponentNode:
                         if not d:
                             return None
                         children = [dict_to_node(c) for c in d.get("children", []) if c]
-                        shadow_root = dict_to_node(d["shadow_root"]) if d.get("shadow_root") else None
+                        shadow_root = (
+                            dict_to_node(d["shadow_root"])
+                            if d.get("shadow_root")
+                            else None
+                        )
                         return ComponentNode(
                             tag=d.get("tag", "div"),
                             attributes=d.get("attributes", {}),
@@ -331,7 +395,7 @@ class ExecutionRouter:
                             children=children,
                             shadow_root=shadow_root,
                             style_provenance=d.get("style_provenance"),
-                            text_content=d.get("text_content")
+                            text_content=d.get("text_content"),
                         )
 
                     for entry in shadow_content:
@@ -344,20 +408,19 @@ class ExecutionRouter:
 
             # ── Phase 2: Schema synthesis (CIDS) ──
             real_root = HTMLToCidsParser.parse(
-                soup_with_cascade, 
-                styles_map, 
-                interactions_map=interactions_map, 
-                shadow_roots_map=shadow_roots_map
+                soup_with_cascade,
+                styles_map,
+                interactions_map=interactions_map,
+                shadow_roots_map=shadow_roots_map,
             )
             cids = CanonicalDesignSchema(
-                url=page_url,
-                tokens=DesignTokens(**design_tokens),
-                root=real_root
+                url=page_url, tokens=DesignTokens(**design_tokens), root=real_root
             )
-            
+
             # Adaptive node validation
             def get_depth_and_count(node: ComponentNode, current_depth=1):
-                if not node.children: return current_depth, 1
+                if not node.children:
+                    return current_depth, 1
                 max_d = current_depth
                 total_c = 1
                 for child in node.children:
@@ -367,49 +430,69 @@ class ExecutionRouter:
                 return max_d, total_c
 
             cids_depth, cids_count = get_depth_and_count(real_root)
-            
-            from bs4 import BeautifulSoup
-            bs_count = len(BeautifulSoup(rewritten_content, 'lxml').find_all(True))
 
-            logger.info("cids_validation_metrics", 
-                        dom_nodes=bs_count,
-                        cids_nodes=cids_count, 
-                        cids_depth=cids_depth, 
-                        css_rules=len(design_tokens.get("colors", {})),
-                        elements_styled=len(styles_map),
-                        url=page_url)
+            from bs4 import BeautifulSoup
+
+            bs_count = len(BeautifulSoup(rewritten_content, "lxml").find_all(True))
+
+            logger.info(
+                "cids_validation_metrics",
+                dom_nodes=bs_count,
+                cids_nodes=cids_count,
+                cids_depth=cids_depth,
+                css_rules=len(design_tokens.get("colors", {})),
+                elements_styled=len(styles_map),
+                url=page_url,
+            )
 
             if bs_count > 10 and cids_count < bs_count * 0.1:
-                raise ValueError(f"CIDS extraction failed proportional consistency check. DOM: {bs_count}, CIDS: {cids_count}")
+                raise ValueError(
+                    f"CIDS extraction failed proportional consistency check. DOM: {bs_count}, CIDS: {cids_count}"
+                )
             if text_val := getattr(real_root, "text_content", None):
                 if "Compiled DOM" in text_val:
                     raise ValueError("Mocked 'Compiled DOM' text found in CIDS root.")
             blueprint = InputBlueprint(
                 slots={
                     "slot_title": DataSlot(
-                        id="slot_title", type="text",
-                        constraint=SlotConstraint(allowed_types=["text"])
+                        id="slot_title",
+                        type="text",
+                        constraint=SlotConstraint(allowed_types=["text"]),
                     )
                 }
             )
-            with open(os.path.join(self.storage.current_run_dir, "schema_cids.json"), "w", encoding="utf-8") as f:
+            with open(
+                os.path.join(self.storage.current_run_dir, "schema_cids.json"),
+                "w",
+                encoding="utf-8",
+            ) as f:
                 f.write(cids.model_dump_json(indent=2))
-            with open(os.path.join(self.storage.current_run_dir, "schema_blueprint.json"), "w", encoding="utf-8") as f:
+            with open(
+                os.path.join(self.storage.current_run_dir, "schema_blueprint.json"),
+                "w",
+                encoding="utf-8",
+            ) as f:
                 f.write(blueprint.model_dump_json(indent=2))
 
             # ── Phase 5: Framework adapter compilation ──
             react_output = self.react_adapter.compile(cids)
-            with open(os.path.join(self.storage.current_run_dir, "output_react.jsx"), "w", encoding="utf-8") as f:
+            with open(
+                os.path.join(self.storage.current_run_dir, "output_react.jsx"),
+                "w",
+                encoding="utf-8",
+            ) as f:
                 f.write(react_output)
             vue_output = self.vue_adapter.compile(cids)
-            with open(os.path.join(self.storage.current_run_dir, "output_vue.vue"), "w", encoding="utf-8") as f:
+            with open(
+                os.path.join(self.storage.current_run_dir, "output_vue.vue"),
+                "w",
+                encoding="utf-8",
+            ) as f:
                 f.write(vue_output)
 
             # ── Phase 7: Semantic interpretation ──
             if self.enable_semantic_layer:
                 self._run_semantic_interpretation(cids, blueprint, page_url)
-
-
 
             # ── Phase 4: AI prompts ──
             prompts = self.prompt_generator.generate_prompts(design_tokens, page_url)
@@ -420,16 +503,78 @@ class ExecutionRouter:
             self.knowledge_index.index_design(page_url, design_tokens)
 
             # ── Phase 3: Structural validation ──
-            structural_result = self.structural_validator.compare(original_content, rewritten_content)
+            structural_result = self.structural_validator.compare(
+                original_content, rewritten_content
+            )
             self._save_json("structural_validation.json", structural_result)
+            if "structural_score" in structural_result:
+                self.scorer.record_structural_similarity(
+                    structural_result["structural_score"], {"url": page_url}
+                )
+
+            # ── Accuracy: Visual fidelity (live original vs. local reconstruction) ──
+            try:
+                original_screenshot_rel = viewport_results.get("desktop")
+                recon_screenshot_rel = await self._capture_reconstruction_screenshot()
+                if original_screenshot_rel and recon_screenshot_rel:
+                    original_screenshot_path = os.path.join(
+                        self.storage.current_run_dir, original_screenshot_rel
+                    )
+                    recon_screenshot_path = os.path.join(
+                        self.storage.current_run_dir, recon_screenshot_rel
+                    )
+                    visual_result = self.visual_diff.compare_screenshots_normalized(
+                        original_screenshot_path, recon_screenshot_path
+                    )
+                    self._save_json("visual_fidelity_report.json", visual_result)
+                    if "similarity_percent" in visual_result:
+                        self.scorer.record_visual_similarity(
+                            visual_result["similarity_percent"], {"url": page_url}
+                        )
+            except Exception as visual_err:
+                logger.warning(
+                    "visual_fidelity_check_failed", url=page_url, error=str(visual_err)
+                )
+                self.scorer.log_non_critical_error(
+                    "Visual fidelity check failed",
+                    {"url": page_url, "error": str(visual_err)},
+                )
 
         except Exception as e:
             result["errors"].append(str(e))
-            self.scorer.log_non_critical_error("Page processing error", {"url": page_url, "error": str(e)})
+            self.scorer.log_non_critical_error(
+                "Page processing error", {"url": page_url, "error": str(e)}
+            )
         finally:
             self.coordinator.release_lock(page_lock)
 
         return result
+
+    async def _capture_reconstruction_screenshot(self) -> Optional[str]:
+        """
+        Renders the locally saved reconstruction (index.html, with localized
+        assets) at the desktop viewport and screenshots it, so it can be
+        pixel-diffed against the live original's desktop capture.
+        """
+        index_path = os.path.join(self.storage.current_run_dir, "index.html")
+        if not os.path.exists(index_path):
+            return None
+
+        file_url = "file://" + os.path.abspath(index_path).replace(os.sep, "/")
+        recon_page = await self.browser.context.new_page()
+        try:
+            await recon_page.set_viewport_size({"width": 1920, "height": 1080})
+            await recon_page.goto(file_url, wait_until="networkidle", timeout=30000)
+            await recon_page.wait_for_timeout(500)
+            screenshot = await recon_page.screenshot(full_page=True)
+
+            filename = "capture_desktop_reconstruction.png"
+            screenshot_path = os.path.join(self.storage.get_asset_path(), filename)
+            with open(screenshot_path, "wb") as f:
+                f.write(screenshot)
+            return f"assets/{filename}"
+        finally:
+            await recon_page.close()
 
     def _run_template_ecosystem(self, url: str, template_id: str) -> None:
         """Phase 6: Template registry, tokens, versioning, preview."""
@@ -437,13 +582,16 @@ class ExecutionRouter:
 
         # Register in registry
         self.template_registry.register(
-            template_id, url,
+            template_id,
+            url,
             tags=["auto-extracted", "web-reconstruction"],
             metadata={"source": "wire_pipeline"},
         )
 
         # Save design tokens
-        design_file = os.path.join(self.storage.current_run_dir, "design_architecture.json")
+        design_file = os.path.join(
+            self.storage.current_run_dir, "design_architecture.json"
+        )
         if os.path.exists(design_file):
             with open(design_file, "r") as f:
                 tokens = json.load(f)
@@ -454,7 +602,11 @@ class ExecutionRouter:
 
             # Generate preview
             preview_html = self.preview.render_preview(
-                {"components": [{"id": "root", "tag": "div", "content": f"Preview of {url}"}]},
+                {
+                    "components": [
+                        {"id": "root", "tag": "div", "content": f"Preview of {url}"}
+                    ]
+                },
                 tokens,
             )
             preview_path = os.path.join(self.storage.current_run_dir, "preview.html")
@@ -475,9 +627,9 @@ class ExecutionRouter:
 
         # Step 1: Classify sections
         classifications = self._section_classifier.classify_tree(cids.root)
-        self._save_json("section_classifications.json", [
-            c.model_dump() for c in classifications
-        ])
+        self._save_json(
+            "section_classifications.json", [c.model_dump() for c in classifications]
+        )
 
         # Step 2: Compile form schema (includes placeholder detection per field)
         form_schema = self._form_compiler.compile(
@@ -514,7 +666,9 @@ class ExecutionRouter:
         with open(filepath, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=2, default=str)
 
-    def remove_sections(self, run_id: str, section_node_paths: List[str]) -> RemovalResult:
+    def remove_sections(
+        self, run_id: str, section_node_paths: List[str]
+    ) -> RemovalResult:
         """
         Phase 8 layout mutation API.
         Applies section removals, validates mutated tree, and if valid,
@@ -533,7 +687,7 @@ class ExecutionRouter:
 
         with open(cids_path, "r", encoding="utf-8") as f:
             cids_data = json.load(f)
-        
+
         cids = CanonicalDesignSchema.model_validate(cids_data)
 
         plans = []
@@ -544,34 +698,44 @@ class ExecutionRouter:
             try:
                 plan = self._removal_planner.plan(current_root, path)
                 mutated_root = self._reflow_engine.execute(current_root, plan)
-                
+
                 # Validate the step
-                report = self._integrity_validator.validate(current_root, mutated_root, path)
-                
+                report = self._integrity_validator.validate(
+                    current_root, mutated_root, path
+                )
+
                 if not report.passed:
-                    logger.warning("remove_sections_validation_failed", path=path, violations=len(report.violations))
+                    logger.warning(
+                        "remove_sections_validation_failed",
+                        path=path,
+                        violations=len(report.violations),
+                    )
                     return RemovalResult(
                         mutated_root=mutated_root,
                         plans=plans + [plan],
                         integrity_report=report,
                         recompilation_triggered=False,
                     )
-                
+
                 current_root = mutated_root
                 plans.append(plan)
             except Exception as e:
-                logger.error("remove_sections_error_during_step", path=path, error=str(e))
+                logger.error(
+                    "remove_sections_error_during_step", path=path, error=str(e)
+                )
                 # Return report with planning/execution error
                 return RemovalResult(
                     mutated_root=current_root,
                     plans=plans,
                     integrity_report=IntegrityReport(
                         passed=False,
-                        violations=[IntegrityViolation(
-                            node_path=path,
-                            rule="planning_or_execution_error",
-                            detail=str(e)
-                        )]
+                        violations=[
+                            IntegrityViolation(
+                                node_path=path,
+                                rule="planning_or_execution_error",
+                                detail=str(e),
+                            )
+                        ],
                     ),
                     recompilation_triggered=False,
                 )
@@ -585,7 +749,9 @@ class ExecutionRouter:
 
         # Re-run Phase 5 compilers
         react_output = self.react_adapter.compile(cids)
-        with open(os.path.join(run_dir, "output_react.jsx"), "w", encoding="utf-8") as f:
+        with open(
+            os.path.join(run_dir, "output_react.jsx"), "w", encoding="utf-8"
+        ) as f:
             f.write(react_output)
 
         vue_output = self.vue_adapter.compile(cids)
@@ -598,7 +764,9 @@ class ExecutionRouter:
         # Build combined final integrity report
         final_report = IntegrityReport(passed=True, violations=[])
 
-        logger.info("remove_sections_completed_successfully", run_id=run_id, plans=len(plans))
+        logger.info(
+            "remove_sections_completed_successfully", run_id=run_id, plans=len(plans)
+        )
         return RemovalResult(
             mutated_root=cids.root,
             plans=plans,
@@ -649,23 +817,29 @@ class ExecutionRouter:
         # Load Form Schema
         with open(form_schema_path, "r", encoding="utf-8") as f:
             form_schema_data = json.load(f)
-        
+
         # Determine Pydantic class to validate
         from wire.schema.semantic_schema import WebsiteFormSchema
         from wire.schema.portfolio_schema import PortfolioFormSchema
+
         if "portfolio_form_schema" in form_schema_path:
             form_schema = PortfolioFormSchema.model_validate(form_schema_data)
         else:
             form_schema = WebsiteFormSchema.model_validate(form_schema_data)
 
         # 2. Strict validation (hard block on failures)
-        validation_report = SubmissionValidator.validate(payload, form_schema, blueprint)
+        validation_report = SubmissionValidator.validate(
+            payload, form_schema, blueprint
+        )
         if not validation_report.is_valid:
-            logger.warning("generate_transformation_prompt_validation_failed", errors=len(validation_report.hard_failures))
+            logger.warning(
+                "generate_transformation_prompt_validation_failed",
+                errors=len(validation_report.hard_failures),
+            )
             return SubmissionResult(
                 success=False,
                 validation_report=validation_report,
-                transformation_prompt=None
+                transformation_prompt=None,
             )
 
         # 3. Image Ingestion (decode, verify, Pillow re-encode, store)
@@ -674,8 +848,7 @@ class ExecutionRouter:
             for field_id, submitted_val in payload.field_values.items():
                 if isinstance(submitted_val, ImageValue) and submitted_val.value:
                     processed = ImageIngestionPipeline.process(
-                        submitted_val.value,
-                        assets_dir
+                        submitted_val.value, assets_dir
                     )
                     # Update in-place to the relative reference path
                     submitted_val.value = processed["stored_path"]
@@ -684,8 +857,7 @@ class ExecutionRouter:
                         for f_id, val in instance.items():
                             if isinstance(val, ImageValue) and val.value:
                                 processed = ImageIngestionPipeline.process(
-                                    val.value,
-                                    assets_dir
+                                    val.value, assets_dir
                                 )
                                 val.value = processed["stored_path"]
         except Exception as e:
@@ -693,12 +865,15 @@ class ExecutionRouter:
             # Fail closed on ingestion failure
             validation_report.is_valid = False
             validation_report.hard_failures.append(
-                ValidationItem(field_id="image_ingestion", message=f"Image ingestion processing failed: {str(e)}")
+                ValidationItem(
+                    field_id="image_ingestion",
+                    message=f"Image ingestion processing failed: {str(e)}",
+                )
             )
             return SubmissionResult(
                 success=False,
                 validation_report=validation_report,
-                transformation_prompt=None
+                transformation_prompt=None,
             )
 
         # 4. Substitution Mapping
@@ -716,13 +891,9 @@ class ExecutionRouter:
 
         # 5. Transformation Prompt Generation (call LLM summarizing only)
         self._llm_guard.reset_call_count()
-        
+
         prompt = TransformationPromptGenerator.generate(
-            cids.root,
-            substitutions,
-            cids.url,
-            self._llm_guard,
-            design_tokens
+            cids.root, substitutions, cids.url, self._llm_guard, design_tokens
         )
 
         # 6. Save prompt output to run directory
@@ -730,11 +901,11 @@ class ExecutionRouter:
         with open(prompt_output_path, "w", encoding="utf-8") as f:
             f.write(prompt.model_dump_json(indent=2))
 
-        logger.info("generate_transformation_prompt_completed_successfully", run_id=run_id)
+        logger.info(
+            "generate_transformation_prompt_completed_successfully", run_id=run_id
+        )
         return SubmissionResult(
             success=True,
             validation_report=validation_report,
-            transformation_prompt=prompt
+            transformation_prompt=prompt,
         )
-
-

@@ -1,9 +1,9 @@
-import os
 import hashlib
-from PIL import Image
+import os
+
 import numpy as np
 import structlog
-from typing import Optional
+from PIL import Image
 
 logger = structlog.get_logger(__name__)
 
@@ -80,7 +80,9 @@ class VisualDiff:
         if not os.path.exists(original_path):
             raise FileNotFoundError(f"Original image file not found: {original_path}")
         if not os.path.exists(reconstruction_path):
-            raise FileNotFoundError(f"Reconstruction image file not found: {reconstruction_path}")
+            raise FileNotFoundError(
+                f"Reconstruction image file not found: {reconstruction_path}"
+            )
 
         img_orig = Image.open(original_path).convert("RGB")
         img_recon = Image.open(reconstruction_path).convert("RGB")
@@ -107,7 +109,7 @@ class VisualDiff:
         similarity = float((matched_pixels_count / total_pixels) * 100.0)
 
         mae = float(np.mean(diff))
-        mse = float(np.mean(diff ** 2))
+        mse = float(np.mean(diff**2))
 
         return {
             "similarity_percent": round(similarity, 2),
@@ -171,3 +173,53 @@ class VisualDiff:
         logger.info("visual_diff_complete", similarity=result["similarity_percent"])
         return result
 
+    def compare_screenshots_normalized(
+        self,
+        original_path: str,
+        reconstruction_path: str,
+        color_tolerance: int = 15,
+    ) -> dict:
+        """
+        Like compare_screenshots, but tolerant of dimension mismatches.
+
+        Full-page screenshots of a live original vs. a static local reconstruction
+        commonly differ in total height (dynamic content, fonts loading, ads, etc.).
+        compare_screenshots/compare_pixel_fidelity intentionally raise on mismatch
+        for callers that require strict equality; this variant resizes the
+        reconstruction to the original's dimensions first so a similarity score
+        can still be produced, flagging that a resize occurred.
+        """
+        if not os.path.exists(original_path) or not os.path.exists(reconstruction_path):
+            return {
+                "error": "One or both files missing",
+                "similarity_percent": 0.0,
+                "comparison_method": "pixel-based (color delta)",
+                "tolerance": color_tolerance,
+            }
+
+        with Image.open(original_path) as img_orig:
+            target_size = img_orig.convert("RGB").size
+
+        normalized_path = reconstruction_path
+        resized = False
+        with Image.open(reconstruction_path) as img_recon:
+            if img_recon.convert("RGB").size != target_size:
+                resized = True
+                normalized_path = f"{reconstruction_path}.normalized.png"
+                img_recon.convert("RGB").resize(target_size, Image.LANCZOS).save(
+                    normalized_path
+                )
+
+        try:
+            result = self.compare_screenshots(
+                original_path, normalized_path, color_tolerance=color_tolerance
+            )
+        finally:
+            if resized and os.path.exists(normalized_path):
+                try:
+                    os.remove(normalized_path)
+                except OSError:
+                    pass
+
+        result["dimension_normalized"] = resized
+        return result
