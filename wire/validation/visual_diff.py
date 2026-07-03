@@ -1,5 +1,7 @@
 import hashlib
 import os
+from io import BytesIO
+from typing import Optional
 
 import numpy as np
 import structlog
@@ -25,28 +27,20 @@ class VisualDiff:
     @staticmethod
     def perceptual_hash(image_bytes: bytes) -> str:
         """
-        Lightweight perceptual hash. Computes an average-brightness
-        fingerprint over 8x8 grid cells of raw pixel data.
-        For production, swap in pHash / dHash with Pillow or imagehash.
+        Real average-hash (aHash): decode the image, downscale to 8x8 grayscale,
+        and threshold each pixel against the mean brightness to form a 64-bit
+        perceptual fingerprint. Unlike a byte-level hash, small visual changes
+        produce small Hamming distances, so hamming_distance() is meaningful.
         """
-        # Simple byte-level fingerprint (works without Pillow)
-        block_size = max(1, len(image_bytes) // 64)
-        bits = []
-        total = 0
-        values = []
-        for i in range(64):
-            start = i * block_size
-            end = start + block_size
-            block = image_bytes[start:end]
-            val = sum(block) / max(len(block), 1)
-            values.append(val)
-            total += val
-
-        avg = total / 64
-        for val in values:
-            bits.append("1" if val >= avg else "0")
-
-        return hex(int("".join(bits), 2))
+        try:
+            img = Image.open(BytesIO(image_bytes)).convert("L").resize((8, 8))
+            arr = np.asarray(img, dtype=np.float64)
+            avg = float(arr.mean())
+            bits = "".join("1" if p >= avg else "0" for p in arr.flatten())
+            return hex(int(bits, 2))
+        except Exception as e:
+            logger.warning("perceptual_hash_failed", error=str(e))
+            return hex(0)
 
     @staticmethod
     def hamming_distance(hash_a: str, hash_b: str) -> int:
@@ -56,11 +50,39 @@ class VisualDiff:
         xor = int_a ^ int_b
         return bin(xor).count("1")
 
+    @staticmethod
+    def volatility_mask(
+        image_paths: list, color_tolerance: int = 15
+    ) -> Optional[np.ndarray]:
+        """Detect dynamic (non-deterministic) regions across repeated renders of
+        the same page.
+
+        Given multiple same-size screenshots of one page, returns a boolean mask
+        (True = volatile) marking pixels whose value varies across the renders by
+        more than ``color_tolerance`` — i.e. ads, carousels, videos, animations.
+        Feeding this mask to the visual comparison stops such regions from
+        penalizing the reconstruction fidelity score. Returns None if fewer than
+        two images are given or their dimensions differ.
+        """
+        existing = [p for p in image_paths if p and os.path.exists(p)]
+        if len(existing) < 2:
+            return None
+        arrays = [
+            np.array(Image.open(p).convert("RGB"), dtype=np.int32) for p in existing
+        ]
+        base_shape = arrays[0].shape
+        if any(a.shape != base_shape for a in arrays):
+            return None
+        stack = np.stack(arrays, axis=0)
+        spread = stack.max(axis=0) - stack.min(axis=0)
+        return np.any(spread > color_tolerance, axis=-1)
+
     def compare_pixel_fidelity(
         self,
         original_path: str,
         reconstruction_path: str,
         color_tolerance: int = 15,
+        ignore_mask: Optional[np.ndarray] = None,
     ) -> dict:
         """
         Compare two images pixel-by-pixel using decoded RGB values from Pillow.
@@ -70,6 +92,8 @@ class VisualDiff:
             reconstruction_path: Path to the reconstructed screenshot PNG.
             color_tolerance: Maximum absolute difference per channel (R, G, B)
                 for a pixel to be counted as matching. Default is 15.
+            ignore_mask: Optional boolean array (True = ignore) of dynamic
+                regions to exclude from the similarity calculation.
 
         Returns:
             A dictionary containing comparison metrics.
@@ -104,17 +128,32 @@ class VisualDiff:
         matching_channels = diff <= color_tolerance
         matching_pixels = np.all(matching_channels, axis=-1)
 
-        total_pixels = matching_pixels.size
-        matched_pixels_count = np.sum(matching_pixels)
-        similarity = float((matched_pixels_count / total_pixels) * 100.0)
+        ignored_pixels = 0
+        if ignore_mask is not None and ignore_mask.shape == matching_pixels.shape:
+            considered = ~ignore_mask
+            total_pixels = int(considered.sum())
+            matched_pixels_count = int((matching_pixels & considered).sum())
+            ignored_pixels = int(ignore_mask.sum())
+            diff_considered = diff[considered]
+            mae = float(np.mean(diff_considered)) if total_pixels else 0.0
+            mse = float(np.mean(diff_considered**2)) if total_pixels else 0.0
+        else:
+            total_pixels = matching_pixels.size
+            matched_pixels_count = int(np.sum(matching_pixels))
+            mae = float(np.mean(diff))
+            mse = float(np.mean(diff**2))
 
-        mae = float(np.mean(diff))
-        mse = float(np.mean(diff**2))
+        similarity = (
+            float((matched_pixels_count / total_pixels) * 100.0)
+            if total_pixels
+            else 100.0
+        )
 
         return {
             "similarity_percent": round(similarity, 2),
             "total_pixels": int(total_pixels),
             "matched_pixels": int(matched_pixels_count),
+            "ignored_pixels": ignored_pixels,
             "mae": round(mae, 4),
             "mse": round(mse, 4),
             "comparison_method": "pixel-based (color delta)",
@@ -126,6 +165,7 @@ class VisualDiff:
         original_path: str,
         reconstruction_path: str,
         color_tolerance: int = 15,
+        ignore_mask: Optional[np.ndarray] = None,
     ) -> dict:
         """
         Compare two screenshot files and return a fidelity report.
@@ -147,7 +187,10 @@ class VisualDiff:
 
         # 1. Retrieve pixel fidelity
         pixel_result = self.compare_pixel_fidelity(
-            original_path, reconstruction_path, color_tolerance=color_tolerance
+            original_path,
+            reconstruction_path,
+            color_tolerance=color_tolerance,
+            ignore_mask=ignore_mask,
         )
 
         # 2. Get byte-level perceptual hashes and file hashes (diagnostic only)
@@ -178,6 +221,7 @@ class VisualDiff:
         original_path: str,
         reconstruction_path: str,
         color_tolerance: int = 15,
+        ignore_mask: Optional[np.ndarray] = None,
     ) -> dict:
         """
         Like compare_screenshots, but tolerant of dimension mismatches.
@@ -188,6 +232,9 @@ class VisualDiff:
         for callers that require strict equality; this variant resizes the
         reconstruction to the original's dimensions first so a similarity score
         can still be produced, flagging that a resize occurred.
+
+        ``ignore_mask`` (dynamic regions in the original) is applied only when it
+        matches the original's dimensions.
         """
         if not os.path.exists(original_path) or not os.path.exists(reconstruction_path):
             return {
@@ -199,6 +246,14 @@ class VisualDiff:
 
         with Image.open(original_path) as img_orig:
             target_size = img_orig.convert("RGB").size
+
+        # (w, h) size -> (h, w) mask shape; only apply if it lines up.
+        safe_mask = None
+        if ignore_mask is not None and ignore_mask.shape == (
+            target_size[1],
+            target_size[0],
+        ):
+            safe_mask = ignore_mask
 
         normalized_path = reconstruction_path
         resized = False
@@ -212,7 +267,10 @@ class VisualDiff:
 
         try:
             result = self.compare_screenshots(
-                original_path, normalized_path, color_tolerance=color_tolerance
+                original_path,
+                normalized_path,
+                color_tolerance=color_tolerance,
+                ignore_mask=safe_mask,
             )
         finally:
             if resized and os.path.exists(normalized_path):

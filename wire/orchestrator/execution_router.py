@@ -23,7 +23,6 @@ from wire.orchestrator.scheduler import TaskScheduler
 from wire.orchestrator.coordinator import Coordinator
 from wire.orchestrator.checkpointing import CheckpointManager
 from wire.orchestrator.semantic_merger import SemanticMerger
-from wire.orchestrator.consensus import ConsensusValidator
 from wire.schema.canonical import (
     CanonicalDesignSchema,
     ComponentNode,
@@ -117,7 +116,6 @@ class ExecutionRouter:
 
         # Phase 5 — Distributed Scale
         self.region_probe = RegionProbe()
-        self.consensus = ConsensusValidator()
 
         # Phase 6 — Template Ecosystem
         self.template_registry = TemplateRegistry()
@@ -331,18 +329,48 @@ class ExecutionRouter:
             )
             self._save_json("region_variants.json", region_results)
 
-            # ── Phase 5: Consensus validation (multi-render) ──
-            renders = []
-            for _ in range(3):
-                render_page = await self.browser.context.new_page()
-                await render_page.goto(
-                    page_url, wait_until="networkidle", timeout=30000
+            # ── Dynamic-region detection (non-deterministic content) ──
+            # Re-render the original a few times at the desktop viewport to find
+            # pixels that vary between identical loads — ads, carousels, videos,
+            # animations. The resulting mask is passed to the visual fidelity
+            # comparison so these regions don't unfairly penalize the score.
+            dynamic_mask = None
+            try:
+                desktop_rel = viewport_results.get("desktop")
+                variant_paths = []
+                if desktop_rel:
+                    variant_paths.append(
+                        os.path.join(self.storage.current_run_dir, desktop_rel)
+                    )
+                await page_obj.set_viewport_size({"width": 1920, "height": 1080})
+                for i in range(2):
+                    await page_obj.wait_for_timeout(300)
+                    shot = await page_obj.screenshot(full_page=True)
+                    vpath = os.path.join(
+                        self.storage.get_asset_path(),
+                        f"capture_desktop_variant{i + 1}.png",
+                    )
+                    with open(vpath, "wb") as vf:
+                        vf.write(shot)
+                    variant_paths.append(vpath)
+                dynamic_mask = self.visual_diff.volatility_mask(variant_paths)
+                self._save_json(
+                    "dynamic_regions.json",
+                    {
+                        "url": page_url,
+                        "renders_compared": len(variant_paths),
+                        "volatile_pixels": (
+                            int(dynamic_mask.sum()) if dynamic_mask is not None else 0
+                        ),
+                        "mask_available": dynamic_mask is not None,
+                    },
                 )
-                render_bytes = await render_page.screenshot(full_page=True)
-                renders.append(render_bytes)
-                await render_page.close()
-            consensus_result = await self.consensus.validate(renders)
-            self._save_json("consensus_validation.json", consensus_result)
+            except Exception as dyn_err:
+                logger.warning(
+                    "dynamic_region_detection_failed",
+                    url=page_url,
+                    error=str(dyn_err),
+                )
 
             await page_obj.close()
 
@@ -538,7 +566,9 @@ class ExecutionRouter:
                         self.storage.current_run_dir, recon_screenshot_rel
                     )
                     visual_result = self.visual_diff.compare_screenshots_normalized(
-                        original_screenshot_path, recon_screenshot_path
+                        original_screenshot_path,
+                        recon_screenshot_path,
+                        ignore_mask=dynamic_mask,
                     )
                     self._save_json("visual_fidelity_report.json", visual_result)
                     if "similarity_percent" in visual_result:
