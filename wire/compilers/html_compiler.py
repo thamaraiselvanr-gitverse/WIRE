@@ -11,11 +11,21 @@ class HTMLCompiler:
         logger.info("compiling_cids_to_html", url=cids.url)
         injected_data = injected_data or {}
 
-        # Collected responsive rules: media_query -> [(class_name, {prop: val})].
-        # Populated during the render walk, emitted as a single <style> block so
-        # breakpoint styling survives (inline styles cannot express @media).
+        # Rules that inline styles cannot express, emitted as one <style> block:
+        #   responsive_rules: media_query -> [(class_name, {prop: val})]
+        #   pseudo_rules:     [(class_name, pseudo, {prop: val})]
+        # A single generated class per node carries both.
         responsive_rules: dict[str, list] = {}
-        self._responsive_counter = 0
+        pseudo_rules: list = []
+        self._gen_class_counter = 0
+
+        def _sanitize_props(props: dict) -> dict:
+            safe = {}
+            for k, v in props.items():
+                sanitized_val = HtmlSanitizer._sanitize_style_string(v)
+                if sanitized_val:
+                    safe[k] = sanitized_val
+            return safe
 
         def render_node(node: ComponentNode) -> str:
             # Unsafe tags filtering (defense-in-depth)
@@ -39,26 +49,30 @@ class HTMLCompiler:
                     + children_str
                 )
 
-            # Register responsive styles under a generated class, filtered through
-            # the same style sanitizer used for inline styles.
-            responsive_class = None
-            if node.responsive_styles:
-                collected = {}
-                for media_query, props in node.responsive_styles.items():
-                    safe_props = {}
-                    for k, v in props.items():
-                        sanitized_val = HtmlSanitizer._sanitize_style_string(v)
-                        if sanitized_val:
-                            safe_props[k] = sanitized_val
-                    if safe_props:
-                        collected[media_query] = safe_props
-                if collected:
-                    self._responsive_counter += 1
-                    responsive_class = f"wire-r{self._responsive_counter}"
-                    for media_query, safe_props in collected.items():
-                        responsive_rules.setdefault(media_query, []).append(
-                            (responsive_class, safe_props)
-                        )
+            # Collect responsive + pseudo styles (which inline styles can't
+            # express) under a single generated class, sanitized like inline.
+            collected_media = {}
+            for media_query, props in (node.responsive_styles or {}).items():
+                safe_props = _sanitize_props(props)
+                if safe_props:
+                    collected_media[media_query] = safe_props
+
+            collected_pseudo = {}
+            for pseudo, props in (node.pseudo_styles or {}).items():
+                safe_props = _sanitize_props(props)
+                if safe_props:
+                    collected_pseudo[pseudo] = safe_props
+
+            gen_class = None
+            if collected_media or collected_pseudo:
+                self._gen_class_counter += 1
+                gen_class = f"wire-r{self._gen_class_counter}"
+                for media_query, safe_props in collected_media.items():
+                    responsive_rules.setdefault(media_query, []).append(
+                        (gen_class, safe_props)
+                    )
+                for pseudo, safe_props in collected_pseudo.items():
+                    pseudo_rules.append((gen_class, pseudo, safe_props))
 
             # Sanitize attributes (defense-in-depth)
             attrs_parts = []
@@ -69,14 +83,14 @@ class HTMLCompiler:
                 if k.lower() in {"href", "src", "action", "formaction"}:
                     if not HtmlSanitizer._is_safe_uri(v):
                         continue
-                if k.lower() == "class" and responsive_class:
-                    merged_class = f"{v} {responsive_class}"
+                if k.lower() == "class" and gen_class:
+                    merged_class = f"{v} {gen_class}"
                     attrs_parts.append(f'class="{merged_class}"')
                     continue
                 attrs_parts.append(f'{k}="{v}"')
             # Add the generated class if the node had no existing class attribute.
-            if responsive_class and merged_class is None:
-                attrs_parts.append(f'class="{responsive_class}"')
+            if gen_class and merged_class is None:
+                attrs_parts.append(f'class="{gen_class}"')
 
             attrs = " ".join(attrs_parts)
             if attrs:
@@ -109,15 +123,22 @@ class HTMLCompiler:
             return f"<{node.tag}{attrs}>{content}{children_str}</{node.tag}>"
 
         body = render_node(cids.root)
-        style_block = self._render_responsive_style_block(responsive_rules)
+        style_block = self._render_style_block(responsive_rules, pseudo_rules)
         return style_block + body
 
     @staticmethod
-    def _render_responsive_style_block(responsive_rules: dict) -> str:
-        """Emit a single <style> element containing all @media rules, or ''."""
-        if not responsive_rules:
+    def _render_style_block(responsive_rules: dict, pseudo_rules: list) -> str:
+        """Emit one <style> element with all @media and pseudo rules, or ''."""
+        if not responsive_rules and not pseudo_rules:
             return ""
         blocks = []
+
+        # Pseudo-class (:hover/:focus/:active) rules.
+        for class_name, pseudo, props in pseudo_rules:
+            decls = "; ".join(f"{k}: {v}" for k, v in props.items())
+            blocks.append(f".{class_name}{pseudo} {{ {decls} }}")
+
+        # Responsive (@media) rules.
         for media_query, entries in responsive_rules.items():
             selectors = []
             for class_name, props in entries:
@@ -125,4 +146,5 @@ class HTMLCompiler:
                 selectors.append(f"  .{class_name} {{ {decls} }}")
             inner = "\n".join(selectors)
             blocks.append(f"{media_query} {{\n{inner}\n}}")
+
         return "<style>\n" + "\n".join(blocks) + "\n</style>"

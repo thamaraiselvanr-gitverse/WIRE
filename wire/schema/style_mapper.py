@@ -155,6 +155,8 @@ class CascadeResolver:
 
         # id(element) -> { "@media ...": { prop: value } }
         self.responsive_map: Dict[int, Dict[str, Dict[str, str]]] = {}
+        # id(element) -> { ":hover": { prop: value }, ":focus": {...}, ":active": {...} }
+        self.pseudo_map: Dict[int, Dict[str, Dict[str, str]]] = {}
 
         # Collect internal style tags into global css execution run
         for style_tag in soup.find_all("style"):
@@ -197,17 +199,39 @@ class CascadeResolver:
                     if not sub_sel:
                         continue
 
-                    # Filter interactive pseudo classes but ALLOW structural pseudo classes
-                    dynamic_triggers = [
-                        ":hover",
-                        ":active",
-                        ":focus",
-                        ":visited",
-                        "::before",
-                        "::after",
-                        ":focus-within",
-                    ]
-                    if any(t in sub_sel for t in dynamic_triggers):
+                    # Pseudo-elements and low-value dynamic states cannot be
+                    # reconstructed cleanly as a scoped style rule — skip them.
+                    if any(
+                        t in sub_sel
+                        for t in ("::before", "::after", ":visited", ":focus-within")
+                    ):
+                        continue
+
+                    # Capture :hover/:focus/:active into the pseudo map keyed by
+                    # the base element (pseudo stripped), for emission as scoped
+                    # rules — inline styles cannot express interaction states.
+                    captured_pseudo = next(
+                        (p for p in (":hover", ":focus", ":active") if p in sub_sel),
+                        None,
+                    )
+                    if captured_pseudo:
+                        base_sel = re.sub(
+                            r"::?[\w-]+(?:\([^)]*\))?", "", sub_sel
+                        ).strip()
+                        if not base_sel:
+                            continue
+                        try:
+                            pseudo_matches = soup.select(base_sel)
+                        except Exception:
+                            continue
+                        for el in pseudo_matches:
+                            el_id = id(el)
+                            mapped_elements.add(el_id)
+                            bucket = self.pseudo_map.setdefault(el_id, {}).setdefault(
+                                captured_pseudo, {}
+                            )
+                            for prop, val in valid_decls:
+                                bucket[prop] = val
                         continue
 
                     try:

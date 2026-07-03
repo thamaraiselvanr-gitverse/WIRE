@@ -16,6 +16,9 @@ class ComponentNode(BaseModel):
     # Inline styles cannot express media queries, so these are compiled into a
     # generated <style> block rather than flattened onto the element.
     responsive_styles: Dict[str, Dict[str, str]] = Field(default_factory=dict)
+    # Interaction-state styles from CSS: { ":hover": { prop: value }, ... }.
+    # Like media queries, these can only be expressed via a scoped <style> rule.
+    pseudo_styles: Dict[str, Dict[str, str]] = Field(default_factory=dict)
     interactions: Dict[str, Any] = Field(default_factory=dict)
     text_content: Optional[str] = None
     children: List["ComponentNode"] = Field(default_factory=list)
@@ -81,6 +84,7 @@ class HTMLToCidsParser:
         interactions_map: dict = None,
         shadow_roots_map: dict = None,
         responsive_map: dict = None,
+        pseudo_map: dict = None,
     ) -> ComponentNode:
         if isinstance(soup_or_html, str):
             soup = BeautifulSoup(soup_or_html, "lxml")
@@ -91,6 +95,7 @@ class HTMLToCidsParser:
         interactions_map = interactions_map or {}
         shadow_roots_map = shadow_roots_map or {}
         responsive_map = responsive_map or {}
+        pseudo_map = pseudo_map or {}
         # Prefer the body tag, otherwise root html, otherwise the whole document
         root_element = getattr(soup, "body", None)
         if not root_element:
@@ -103,6 +108,7 @@ class HTMLToCidsParser:
             interactions_map,
             shadow_roots_map,
             responsive_map,
+            pseudo_map,
         ) or ComponentNode(tag="div")
 
     @staticmethod
@@ -113,6 +119,7 @@ class HTMLToCidsParser:
         interactions_map: dict = None,
         shadow_roots_map: dict = None,
         responsive_map: dict = None,
+        pseudo_map: dict = None,
     ) -> Optional[ComponentNode]:
         if isinstance(node, Comment):
             return None
@@ -192,6 +199,19 @@ class HTMLToCidsParser:
             if sanitized_props:
                 responsive_styles[media_query] = sanitized_props
 
+        # Interaction-state (:hover/:focus/:active) styles from CSS.
+        pseudo_map = pseudo_map or {}
+        pseudo_styles = {}
+        for pseudo, props in pseudo_map.get(id(node), {}).items():
+            sanitized_props = {}
+            for k, v in props.items():
+                resolved_val = HTMLToCidsParser._resolve_vars(v, effective_scope)
+                sanitized_val = HtmlSanitizer._sanitize_style_string(resolved_val)
+                if sanitized_val:
+                    sanitized_props[k] = sanitized_val
+            if sanitized_props:
+                pseudo_styles[pseudo] = sanitized_props
+
         # Compute selector path to look up shadow DOMs
         shadow_roots_map = shadow_roots_map or {}
 
@@ -226,6 +246,7 @@ class HTMLToCidsParser:
                     interactions_map,
                     shadow_roots_map,
                     responsive_map,
+                    pseudo_map,
                 )
                 if child_node:
                     children.append(child_node)
@@ -235,6 +256,7 @@ class HTMLToCidsParser:
             attributes=attributes,
             styles=styles_for_node,
             responsive_styles=responsive_styles,
+            pseudo_styles=pseudo_styles,
             interactions=interactions,
             children=children,
             shadow_root=shadow_root,
