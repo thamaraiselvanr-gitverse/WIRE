@@ -66,10 +66,15 @@ from wire.schema.submission_schema import (
     ValidationSummary,
     ValidationItem,
     ImageValue,
+    VideoValue,
+    AudioValue,
+    DocumentValue,
     RepeatableGroupValue,
 )
 from wire.generation.submission_validator import SubmissionValidator
 from wire.generation.image_ingestion import ImageIngestionPipeline
+from wire.generation.media_ingestion import MediaIngestionPipeline
+from wire.generation.document_ingestion import DocumentIngestionPipeline
 from wire.generation.substitution_mapper import SubstitutionMapper
 from wire.generation.transformation_prompt_generator import (
     TransformationPromptGenerator,
@@ -886,32 +891,25 @@ class ExecutionRouter:
                 transformation_prompt=None,
             )
 
-        # 3. Image Ingestion (decode, verify, Pillow re-encode, store)
+        # 3. Multi-modal ingestion (image, video, audio, document): decode,
+        #    verify, store, and replace the base64 value with a stored path.
         assets_dir = os.path.join(run_dir, "assets")
         try:
             for field_id, submitted_val in payload.field_values.items():
-                if isinstance(submitted_val, ImageValue) and submitted_val.value:
-                    processed = ImageIngestionPipeline.process(
-                        submitted_val.value, assets_dir
-                    )
-                    # Update in-place to the relative reference path
-                    submitted_val.value = processed["stored_path"]
-                elif isinstance(submitted_val, RepeatableGroupValue):
+                if isinstance(submitted_val, RepeatableGroupValue):
                     for instance in submitted_val.instances:
                         for f_id, val in instance.items():
-                            if isinstance(val, ImageValue) and val.value:
-                                processed = ImageIngestionPipeline.process(
-                                    val.value, assets_dir
-                                )
-                                val.value = processed["stored_path"]
+                            self._ingest_submitted_value(val, assets_dir)
+                else:
+                    self._ingest_submitted_value(submitted_val, assets_dir)
         except Exception as e:
-            logger.error("image_ingestion_failed_during_substitution", error=str(e))
+            logger.error("ingestion_failed_during_substitution", error=str(e))
             # Fail closed on ingestion failure
             validation_report.is_valid = False
             validation_report.hard_failures.append(
                 ValidationItem(
-                    field_id="image_ingestion",
-                    message=f"Image ingestion processing failed: {str(e)}",
+                    field_id="media_ingestion",
+                    message=f"Media/document ingestion failed: {str(e)}",
                 )
             )
             return SubmissionResult(
@@ -953,6 +951,33 @@ class ExecutionRouter:
             validation_report=validation_report,
             transformation_prompt=prompt,
         )
+
+    @staticmethod
+    def _ingest_submitted_value(val: Any, assets_dir: str) -> None:
+        """Dispatch a single submitted value to the right ingestion pipeline,
+        replacing its base64 payload with a stored run-relative path in place."""
+        if not getattr(val, "value", None):
+            return
+        if isinstance(val, ImageValue):
+            processed = ImageIngestionPipeline.process(val.value, assets_dir)
+            val.value = processed["stored_path"]
+        elif isinstance(val, VideoValue):
+            processed = MediaIngestionPipeline.process(
+                val.value, assets_dir, kind="video"
+            )
+            val.value = processed["stored_path"]
+        elif isinstance(val, AudioValue):
+            processed = MediaIngestionPipeline.process(
+                val.value, assets_dir, kind="audio"
+            )
+            val.value = processed["stored_path"]
+        elif isinstance(val, DocumentValue):
+            processed = DocumentIngestionPipeline.process(
+                val.value, assets_dir, original_filename=val.original_filename
+            )
+            val.value = processed["stored_path"]
+            # Preserve extracted text so substitution/prompt can use it.
+            val.extracted_text = processed.get("extracted_text")
 
     def apply_brand(self, run_id: str, brand_tokens: Dict[str, Any]) -> Dict[str, Any]:
         """

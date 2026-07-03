@@ -1,18 +1,21 @@
 from pydantic import BaseModel, Field, field_validator
 from typing import Dict, Any, Literal
 
+
 class SlotConstraint(BaseModel):
     allowed_types: list[str]
     max_length: int | None = None
     max_width: int | None = None
     max_height: int | None = None
 
+
 class DataSlot(BaseModel):
     id: str
-    type: Literal["text", "image", "video", "audio"]
+    type: Literal["text", "image", "video", "audio", "document"]
     constraint: SlotConstraint
     required: bool = False
     fallback: Any | None = None
+
 
 class InputBlueprint(BaseModel):
     schema_version: str = "1.0"
@@ -40,17 +43,21 @@ class InputBlueprint(BaseModel):
             return {
                 "valid": False,
                 "severity": "hard" if strict else "soft",
-                "message": f"Slot '{slot_id}' not found in blueprint."
+                "message": f"Slot '{slot_id}' not found in blueprint.",
             }
 
         # Hard validations:
         # 1. Required field check (missing / None / empty string / empty list)
         if slot.required:
-            if value is None or value == "" or (isinstance(value, list) and len(value) == 0):
+            if (
+                value is None
+                or value == ""
+                or (isinstance(value, list) and len(value) == 0)
+            ):
                 return {
                     "valid": False,
                     "severity": "hard",
-                    "message": f"Required slot '{slot_id}' is missing or empty."
+                    "message": f"Required slot '{slot_id}' is missing or empty.",
                 }
 
         # Optional slots left empty:
@@ -58,7 +65,7 @@ class InputBlueprint(BaseModel):
             return {
                 "valid": True,
                 "severity": "soft",
-                "message": f"Optional slot '{slot_id}' is empty."
+                "message": f"Optional slot '{slot_id}' is empty.",
             }
 
         # 2. Type mismatch:
@@ -67,27 +74,29 @@ class InputBlueprint(BaseModel):
                 return {
                     "valid": False,
                     "severity": "hard",
-                    "message": f"Type mismatch: slot '{slot_id}' expected text, got {type(value).__name__}."
+                    "message": f"Type mismatch: slot '{slot_id}' expected text, got {type(value).__name__}.",
                 }
         elif slot.type == "image":
             if not isinstance(value, (str, dict)):
                 return {
                     "valid": False,
                     "severity": "hard",
-                    "message": f"Type mismatch: slot '{slot_id}' expected image reference, got {type(value).__name__}."
+                    "message": f"Type mismatch: slot '{slot_id}' expected image reference, got {type(value).__name__}.",
                 }
-            if isinstance(value, str) and ("placeholder" in value.lower() or "default" in value.lower()):
+            if isinstance(value, str) and (
+                "placeholder" in value.lower() or "default" in value.lower()
+            ):
                 return {
                     "valid": True,
                     "severity": "soft",
-                    "message": f"Slot '{slot_id}' contains a placeholder image value: '{value}'."
+                    "message": f"Slot '{slot_id}' contains a placeholder image value: '{value}'.",
                 }
-        elif slot.type in ("video", "audio"):
+        elif slot.type in ("video", "audio", "document"):
             if not isinstance(value, str):
                 return {
                     "valid": False,
                     "severity": "hard",
-                    "message": f"Type mismatch: slot '{slot_id}' expected media path/URL, got {type(value).__name__}."
+                    "message": f"Type mismatch: slot '{slot_id}' expected media/document path/URL, got {type(value).__name__}.",
                 }
 
         # Soft validations:
@@ -98,13 +107,13 @@ class InputBlueprint(BaseModel):
                 return {
                     "valid": True,
                     "severity": "soft",
-                    "message": f"Text in slot '{slot_id}' length ({len(value)}) exceeds recommended limit ({max_len})."
+                    "message": f"Text in slot '{slot_id}' length ({len(value)}) exceeds recommended limit ({max_len}).",
                 }
             if "lorem ipsum" in value.lower() or "placeholder" in value.lower():
                 return {
                     "valid": True,
                     "severity": "soft",
-                    "message": f"Slot '{slot_id}' text contains placeholder pattern: '{value[:30]}...'."
+                    "message": f"Slot '{slot_id}' text contains placeholder pattern: '{value[:30]}...'.",
                 }
 
         # 4. Image dimensions validation:
@@ -117,22 +126,24 @@ class InputBlueprint(BaseModel):
                 return {
                     "valid": True,
                     "severity": "soft",
-                    "message": f"Image in slot '{slot_id}' width ({w}) exceeds recommended limit ({max_w})."
+                    "message": f"Image in slot '{slot_id}' width ({w}) exceeds recommended limit ({max_w}).",
                 }
             if max_h and h and h > max_h:
                 return {
                     "valid": True,
                     "severity": "soft",
-                    "message": f"Image in slot '{slot_id}' height ({h}) exceeds recommended limit ({max_h})."
+                    "message": f"Image in slot '{slot_id}' height ({h}) exceeds recommended limit ({max_h}).",
                 }
 
         return {
             "valid": True,
             "severity": None,
-            "message": f"Slot '{slot_id}' validates successfully."
+            "message": f"Slot '{slot_id}' validates successfully.",
         }
 
-    def generate_summary_report(self, inputs: Dict[str, Any], strict: bool = True) -> dict:
+    def generate_summary_report(
+        self, inputs: Dict[str, Any], strict: bool = True
+    ) -> dict:
         """
         Validates all inputs and aggregates them into a structured report.
         """
@@ -140,28 +151,25 @@ class InputBlueprint(BaseModel):
             "is_valid": True,
             "hard_failures": [],
             "soft_warnings": [],
-            "successes": []
+            "successes": [],
         }
 
         for slot_id, slot in self.slots.items():
             val = inputs.get(slot_id)
             res = self.validate_input(slot_id, val, strict=strict)
-            
+
             if not res["valid"]:
                 report["is_valid"] = False
-                report["hard_failures"].append({
-                    "slot_id": slot_id,
-                    "message": res["message"]
-                })
+                report["hard_failures"].append(
+                    {"slot_id": slot_id, "message": res["message"]}
+                )
             elif res["severity"] == "soft":
-                report["soft_warnings"].append({
-                    "slot_id": slot_id,
-                    "message": res["message"]
-                })
+                report["soft_warnings"].append(
+                    {"slot_id": slot_id, "message": res["message"]}
+                )
             else:
-                report["successes"].append({
-                    "slot_id": slot_id,
-                    "message": res["message"]
-                })
+                report["successes"].append(
+                    {"slot_id": slot_id, "message": res["message"]}
+                )
 
         return report

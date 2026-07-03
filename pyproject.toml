@@ -32,6 +32,11 @@ dependencies = [
 wire = "wire.main:main"
 
 [project.optional-dependencies]
+# PDF text extraction for document ingestion. Optional: without it, PDFs are
+# still accepted and stored, only their text is not extracted.
+documents = [
+    "pypdf>=4.0.0",
+]
 dev = [
     "pytest>=8.1.1",
     "pytest-asyncio>=0.23.6",
