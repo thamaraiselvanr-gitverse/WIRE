@@ -125,6 +125,19 @@ class CascadeResolver:
 
         return (0, ids, classes, tags, source_order)
 
+    def _valid_decls_from_content(self, content) -> list:
+        """Parse a declaration-list token stream into allowed (prop, value) pairs."""
+        decls = tinycss2.parse_declaration_list(
+            content, skip_comments=True, skip_whitespace=True
+        )
+        valid = []
+        for decl in decls:
+            if getattr(decl, "type", None) == "declaration":
+                prop = decl.lower_name
+                if prop in self.allowed_props or prop.startswith("--"):
+                    valid.append((prop, tinycss2.serialize(decl.value).strip()))
+        return valid
+
     def resolve(
         self, html_content: str, css_content: str
     ) -> Tuple[BeautifulSoup, Dict[int, Dict[str, str]]]:
@@ -132,9 +145,16 @@ class CascadeResolver:
         Performs the heavy mapping of CSS definitions onto HTML targets.
         Yields a modified parsed HTML and an element style map.
         id(bs4_element) -> { property -> value }
+
+        Responsive (``@media``) rules are captured separately into
+        ``self.responsive_map`` (id(bs4_element) -> { media_query -> {prop: val} })
+        so breakpoint-specific styling is preserved rather than dropped.
         """
         logger.info("resolving_css_cascade_started")
         soup = BeautifulSoup(html_content, "lxml")
+
+        # id(element) -> { "@media ...": { prop: value } }
+        self.responsive_map: Dict[int, Dict[str, Dict[str, str]]] = {}
 
         # Collect internal style tags into global css execution run
         for style_tag in soup.find_all("style"):
@@ -211,6 +231,40 @@ class CascadeResolver:
                             )[0]
                             if spec >= current_spec:
                                 element_specificity_map[el_id][prop] = (spec, val)
+
+            elif (
+                getattr(rule, "type", None) == "at-rule"
+                and getattr(rule, "lower_at_keyword", None) == "media"
+                and rule.content is not None
+            ):
+                media_query = "@media " + tinycss2.serialize(rule.prelude).strip()
+                inner_rules = tinycss2.parse_rule_list(
+                    rule.content, skip_comments=True, skip_whitespace=True
+                )
+                for inner in inner_rules:
+                    if getattr(inner, "type", None) != "qualified-rule":
+                        continue
+                    inner_sel = tinycss2.serialize(inner.prelude).strip()
+                    inner_decls = self._valid_decls_from_content(inner.content)
+                    if not inner_decls:
+                        continue
+                    for sub_sel in inner_sel.split(","):
+                        sub_sel = sub_sel.strip()
+                        if not sub_sel or "::" in sub_sel:
+                            continue
+                        try:
+                            matches = soup.select(sub_sel)
+                        except Exception:
+                            continue
+                        for el in matches:
+                            el_id = id(el)
+                            mapped_elements.add(el_id)
+                            bucket = self.responsive_map.setdefault(
+                                el_id, {}
+                            ).setdefault(media_query, {})
+                            # Source-order last-wins within a media block.
+                            for prop, val in inner_decls:
+                                bucket[prop] = val
 
         # Evaluate Inline Styles Overrides
         for el in soup.find_all(style=True):

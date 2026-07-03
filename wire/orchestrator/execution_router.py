@@ -412,6 +412,7 @@ class ExecutionRouter:
                 styles_map,
                 interactions_map=interactions_map,
                 shadow_roots_map=shadow_roots_map,
+                responsive_map=getattr(resolver, "responsive_map", {}),
             )
             cids = CanonicalDesignSchema(
                 url=page_url, tokens=DesignTokens(**design_tokens), root=real_root
