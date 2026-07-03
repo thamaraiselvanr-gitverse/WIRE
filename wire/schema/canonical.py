@@ -37,6 +37,10 @@ class CanonicalDesignSchema(BaseModel):
     viewport: str = "desktop"
     tokens: DesignTokens = Field(default_factory=DesignTokens)
     root: ComponentNode
+    # Document-level at-rules (@font-face, @keyframes) captured verbatim; they
+    # are not element-scoped, so they are emitted whole into the generated
+    # <style> block by the compilers to preserve webfonts and animations.
+    global_styles: List[str] = Field(default_factory=list)
 
 
 from bs4 import BeautifulSoup, NavigableString, Comment

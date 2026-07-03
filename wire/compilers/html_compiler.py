@@ -1,6 +1,7 @@
 import structlog
 
 from wire.compilers.sanitizer import HtmlSanitizer
+from wire.compilers.style_emission import render_css
 from wire.schema.canonical import CanonicalDesignSchema, ComponentNode
 
 logger = structlog.get_logger(__name__)
@@ -123,28 +124,8 @@ class HTMLCompiler:
             return f"<{node.tag}{attrs}>{content}{children_str}</{node.tag}>"
 
         body = render_node(cids.root)
-        style_block = self._render_style_block(responsive_rules, pseudo_rules)
+        css = render_css(
+            getattr(cids, "global_styles", []), pseudo_rules, responsive_rules
+        )
+        style_block = f"<style>\n{css}\n</style>" if css else ""
         return style_block + body
-
-    @staticmethod
-    def _render_style_block(responsive_rules: dict, pseudo_rules: list) -> str:
-        """Emit one <style> element with all @media and pseudo rules, or ''."""
-        if not responsive_rules and not pseudo_rules:
-            return ""
-        blocks = []
-
-        # Pseudo-class (:hover/:focus/:active) rules.
-        for class_name, pseudo, props in pseudo_rules:
-            decls = "; ".join(f"{k}: {v}" for k, v in props.items())
-            blocks.append(f".{class_name}{pseudo} {{ {decls} }}")
-
-        # Responsive (@media) rules.
-        for media_query, entries in responsive_rules.items():
-            selectors = []
-            for class_name, props in entries:
-                decls = "; ".join(f"{k}: {v}" for k, v in props.items())
-                selectors.append(f"  .{class_name} {{ {decls} }}")
-            inner = "\n".join(selectors)
-            blocks.append(f"{media_query} {{\n{inner}\n}}")
-
-        return "<style>\n" + "\n".join(blocks) + "\n</style>"

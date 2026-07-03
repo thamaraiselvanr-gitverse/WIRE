@@ -157,6 +157,8 @@ class CascadeResolver:
         self.responsive_map: Dict[int, Dict[str, Dict[str, str]]] = {}
         # id(element) -> { ":hover": { prop: value }, ":focus": {...}, ":active": {...} }
         self.pseudo_map: Dict[int, Dict[str, Dict[str, str]]] = {}
+        # Document-level at-rules (@font-face, @keyframes) captured verbatim.
+        self.global_styles: list = []
 
         # Collect internal style tags into global css execution run
         for style_tag in soup.find_all("style"):
@@ -289,6 +291,16 @@ class CascadeResolver:
                             # Source-order last-wins within a media block.
                             for prop, val in inner_decls:
                                 bucket[prop] = val
+
+            elif getattr(rule, "type", None) == "at-rule" and getattr(
+                rule, "lower_at_keyword", None
+            ) in ("font-face", "keyframes", "-webkit-keyframes", "-moz-keyframes"):
+                # Document-level rules (webfonts, animations) captured verbatim;
+                # they are not element-scoped so they can't be flattened inline.
+                try:
+                    self.global_styles.append(rule.serialize().strip())
+                except Exception:
+                    pass
 
         # Evaluate Inline Styles Overrides
         for el in soup.find_all(style=True):

@@ -416,7 +416,10 @@ class ExecutionRouter:
                 pseudo_map=getattr(resolver, "pseudo_map", {}),
             )
             cids = CanonicalDesignSchema(
-                url=page_url, tokens=DesignTokens(**design_tokens), root=real_root
+                url=page_url,
+                tokens=DesignTokens(**design_tokens),
+                root=real_root,
+                global_styles=getattr(resolver, "global_styles", []),
             )
 
             # Adaptive node validation

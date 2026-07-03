@@ -1,6 +1,8 @@
 import structlog
-from wire.schema.canonical import CanonicalDesignSchema, ComponentNode
+
 from wire.compilers.sanitizer import HtmlSanitizer
+from wire.compilers.style_emission import collect_generated_styles, merge_class
+from wire.schema.canonical import CanonicalDesignSchema, ComponentNode
 
 logger = structlog.get_logger(__name__)
 
@@ -23,11 +25,21 @@ class VueAdapter:
     def compile(self, cids: CanonicalDesignSchema) -> str:
         logger.info("compiling_cids_to_vue", url=cids.url)
 
+        # Styles that inline :style bindings cannot express (@media, pseudo
+        # states, @font-face/@keyframes) go into a separate non-scoped <style>
+        # block; each affected node gains a generated class in self._class_map.
+        self._class_map, generated_css = collect_generated_styles(
+            cids.root, getattr(cids, "global_styles", [])
+        )
+
         template = self._render_template(cids.root)
         script = self._render_script(cids)
         style = self._render_style(cids)
 
-        return f"<template>\n{template}\n</template>\n\n{script}\n\n{style}\n"
+        parts = [f"<template>\n{template}\n</template>", script, style]
+        if generated_css:
+            parts.append(f"<style>\n{generated_css}\n</style>")
+        return "\n\n".join(parts) + "\n"
 
     def _render_template(self, node: ComponentNode, indent: int = 2) -> str:
         prefix = " " * indent
@@ -41,9 +53,13 @@ class VueAdapter:
             return ""
 
         if tag == "#shadow-root":
-            children_str = "\n".join([self._render_template(c, indent + 2) for c in node.children])
+            children_str = "\n".join(
+                [self._render_template(c, indent + 2) for c in node.children]
+            )
             return f'{prefix}<template shadowrootmode="open">\n{children_str}\n{prefix}</template>'
 
+        gen_class = getattr(self, "_class_map", {}).get(id(node))
+        class_emitted = False
         attrs_parts = []
         for key, value in node.attributes.items():
             if key == "style":
@@ -53,7 +69,12 @@ class VueAdapter:
             if key.lower() in {"href", "src", "action", "formaction"}:
                 if not HtmlSanitizer._is_safe_uri(value):
                     continue
+            if key.lower() == "class":
+                value = merge_class(value, gen_class)
+                class_emitted = True
             attrs_parts.append(f'{key}="{value}"')
+        if gen_class and not class_emitted:
+            attrs_parts.append(f'class="{gen_class}"')
 
         if node.styles:
             style_parts = []
