@@ -49,11 +49,17 @@ export function CommandCenter() {
   const [url, setUrl] = useState('');
   const [projects, setProjects] = useState<any[]>([]);
   const [selectedProject, setSelectedProject] = useState<any | null>(null);
-  const [activeTab, setActiveTab] = useState<'visuals' | 'code' | 'prompts'>('visuals');
+  const [activeTab, setActiveTab] = useState<'visuals' | 'preview' | 'code' | 'prompts'>('visuals');
   const [codeType, setCodeType] = useState<'react' | 'vue' | 'html'>('react');
   const [fileContent, setFileContent] = useState<string>('');
   const [fileLoading, setFileLoading] = useState(false);
   const [prompts, setPrompts] = useState<string[]>([]);
+  // Brand-transfer + live preview state.
+  const [brandPrimary, setBrandPrimary] = useState('#4f46e5');
+  const [brandBackground, setBrandBackground] = useState('#ffffff');
+  const [brandBusy, setBrandBusy] = useState(false);
+  const [brandMessage, setBrandMessage] = useState('');
+  const [previewVersion, setPreviewVersion] = useState(0);
 
   useEffect(() => {
     fetchProjects();
@@ -106,6 +112,25 @@ export function CommandCenter() {
       console.error(e);
     } finally {
       setFileLoading(false);
+    }
+  };
+
+  const applyBrand = async () => {
+    if (!selectedProject) return;
+    setBrandBusy(true);
+    setBrandMessage('');
+    try {
+      const { data } = await api.post(`/projects/${selectedProject.id}/brand`, {
+        colors: { primary: brandPrimary, background: brandBackground },
+      });
+      setBrandMessage(`Applied — ${data.colors_remapped} color(s) remapped.`);
+      // Cache-bust the preview iframe so it reloads the recompiled output.
+      setPreviewVersion((v) => v + 1);
+    } catch (e) {
+      setBrandMessage('Failed to apply brand. Ensure the reconstruction finished.');
+      console.error(e);
+    } finally {
+      setBrandBusy(false);
     }
   };
 
@@ -243,7 +268,20 @@ export function CommandCenter() {
               >
                 Visual Captures
               </button>
-              <button 
+              <button
+                onClick={() => setActiveTab('preview')}
+                style={{
+                  background: activeTab === 'preview' ? 'var(--primary)' : 'transparent',
+                  color: activeTab === 'preview' ? '#000' : 'var(--text-muted)',
+                  border: activeTab === 'preview' ? 'none' : '1px solid var(--panel-border)',
+                  padding: '8px 16px',
+                  borderRadius: '6px',
+                  fontSize: '0.9rem'
+                }}
+              >
+                Live Preview
+              </button>
+              <button
                 onClick={() => setActiveTab('code')}
                 style={{
                   background: activeTab === 'code' ? 'var(--primary)' : 'transparent',
@@ -300,6 +338,37 @@ export function CommandCenter() {
                         style={{ width: '100%', borderRadius: '8px', border: '1px solid var(--panel-border)', background: '#000' }}
                       />
                     </div>
+                  </div>
+                </div>
+              )}
+
+              {activeTab === 'preview' && (
+                <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '12px', overflow: 'hidden' }}>
+                  {/* Brand-transfer controls */}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '16px', flexWrap: 'wrap', padding: '12px', background: 'rgba(255,255,255,0.02)', border: '1px solid var(--panel-border)', borderRadius: '8px' }}>
+                    <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>Brand transfer:</span>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.85rem' }}>
+                      Primary
+                      <input type="color" value={brandPrimary} onChange={e => setBrandPrimary(e.target.value)} style={{ width: '36px', height: '28px', padding: 0, border: 'none', background: 'none' }} />
+                    </label>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.85rem' }}>
+                      Background
+                      <input type="color" value={brandBackground} onChange={e => setBrandBackground(e.target.value)} style={{ width: '36px', height: '28px', padding: 0, border: 'none', background: 'none' }} />
+                    </label>
+                    <button onClick={applyBrand} disabled={brandBusy} className="btn-primary" style={{ padding: '6px 14px', fontSize: '0.85rem' }}>
+                      {brandBusy ? 'Applying…' : 'Apply & Preview'}
+                    </button>
+                    {brandMessage && <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>{brandMessage}</span>}
+                  </div>
+
+                  {/* Editable reconstruction preview */}
+                  <div style={{ flex: 1, overflow: 'hidden', background: '#fff', border: '1px solid var(--panel-border)', borderRadius: '8px' }}>
+                    <iframe
+                      key={previewVersion}
+                      title="Editable reconstruction preview"
+                      src={`http://localhost:8000/api/projects/${selectedProject.id}/files/output_editable.html?token=${token}&v=${previewVersion}`}
+                      style={{ width: '100%', height: '100%', border: 'none', background: '#fff' }}
+                    />
                   </div>
                 </div>
               )}
