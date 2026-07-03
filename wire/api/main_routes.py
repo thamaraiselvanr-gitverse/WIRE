@@ -23,6 +23,14 @@ class BrandRequest(BaseModel):
     colors: dict
 
 
+class SubstituteRequest(BaseModel):
+    # Map of field_id -> submitted value dict, e.g.
+    # {"headline": {"type": "text", "value": "Hi"},
+    #  "hero_img": {"type": "image", "value": "<b64>",
+    #               "original_filename": "a.png", "content_type": "image/png"}}
+    field_values: dict
+
+
 # In-memory queue for streaming log events to clients
 log_event_queues = []
 
@@ -132,6 +140,51 @@ async def apply_brand(
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     return summary
+
+
+@router.post("/{project_id}/substitute")
+async def substitute_content(
+    project_id: int,
+    req: SubstituteRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Submit user content (text/image/video/audio/document) for a run.
+
+    Validates the submission against the run's form schema, ingests uploaded
+    media/documents, maps substitutions, and generates the transformation
+    prompt. Returns the SubmissionResult (validation report + prompt).
+    """
+    result = await db.execute(
+        select(Project).where(
+            (Project.id == project_id) & (Project.owner_id == current_user.id)
+        )
+    )
+    project = result.scalars().first()
+    if not project:
+        raise HTTPException(
+            status_code=404, detail="Project not found or access denied"
+        )
+
+    from pydantic import ValidationError
+
+    from wire.orchestrator.execution_router import ExecutionRouter
+    from wire.schema.submission_schema import SubmissionPayload
+
+    run_id = _run_id_for_url(project.url)
+    try:
+        payload = SubmissionPayload(run_id=run_id, field_values=req.field_values)
+    except ValidationError as e:
+        raise HTTPException(status_code=422, detail=f"Invalid submission payload: {e}")
+
+    router_engine = ExecutionRouter()
+    try:
+        submission_result = router_engine.generate_transformation_prompt(
+            run_id, payload
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return submission_result.model_dump()
 
 
 async def get_current_user_file(request: Request, db: AsyncSession):

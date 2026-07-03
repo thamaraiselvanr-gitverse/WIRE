@@ -49,7 +49,7 @@ export function CommandCenter() {
   const [url, setUrl] = useState('');
   const [projects, setProjects] = useState<any[]>([]);
   const [selectedProject, setSelectedProject] = useState<any | null>(null);
-  const [activeTab, setActiveTab] = useState<'visuals' | 'preview' | 'code' | 'prompts'>('visuals');
+  const [activeTab, setActiveTab] = useState<'visuals' | 'preview' | 'content' | 'code' | 'prompts'>('visuals');
   const [codeType, setCodeType] = useState<'react' | 'vue' | 'html'>('react');
   const [fileContent, setFileContent] = useState<string>('');
   const [fileLoading, setFileLoading] = useState(false);
@@ -60,6 +60,11 @@ export function CommandCenter() {
   const [brandBusy, setBrandBusy] = useState(false);
   const [brandMessage, setBrandMessage] = useState('');
   const [previewVersion, setPreviewVersion] = useState(0);
+  // Content-editor (multi-modal input) state.
+  const [schemaFields, setSchemaFields] = useState<any[]>([]);
+  const [contentValues, setContentValues] = useState<Record<string, any>>({});
+  const [contentBusy, setContentBusy] = useState(false);
+  const [contentMessage, setContentMessage] = useState('');
 
   useEffect(() => {
     fetchProjects();
@@ -71,12 +76,89 @@ export function CommandCenter() {
         fetchCode();
       } else if (activeTab === 'prompts') {
         fetchPrompts();
+      } else if (activeTab === 'content') {
+        fetchSchema();
       }
     } else {
       setFileContent('');
       setPrompts([]);
+      setSchemaFields([]);
+      setContentValues({});
     }
   }, [selectedProject, activeTab, codeType]);
+
+  const fetchSchema = async () => {
+    if (!selectedProject) return;
+    setFileLoading(true);
+    setContentMessage('');
+    try {
+      const { data } = await api.get(`/projects/${selectedProject.id}/files/website_form_schema.json`);
+      const schema = typeof data === 'object' ? data : JSON.parse(data);
+      setSchemaFields(Array.isArray(schema.fields) ? schema.fields : []);
+    } catch (e) {
+      setSchemaFields([]);
+      setContentMessage('No form schema found for this project (semantic layer may be disabled).');
+      console.error(e);
+    } finally {
+      setFileLoading(false);
+    }
+  };
+
+  const readFileAsBase64 = (file: File): Promise<string> =>
+    new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const result = String(reader.result || '');
+        // Strip the "data:...;base64," prefix.
+        resolve(result.includes(',') ? result.split(',', 2)[1] : result);
+      };
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+
+  const submitContent = async () => {
+    if (!selectedProject) return;
+    setContentBusy(true);
+    setContentMessage('');
+    try {
+      const fieldValues: Record<string, any> = {};
+      for (const field of schemaFields) {
+        const entry = contentValues[field.field_id];
+        if (entry === undefined || entry === null || entry === '') continue;
+        const ft = field.field_type;
+        if (ft === 'text' || ft === 'textarea' || ft === 'color') {
+          fieldValues[field.field_id] = { type: 'text', value: String(entry) };
+        } else if (ft === 'url') {
+          fieldValues[field.field_id] = { type: 'url', value: String(entry) };
+        } else if (['image', 'video', 'audio', 'document'].includes(ft) && entry instanceof File) {
+          const b64 = await readFileAsBase64(entry);
+          fieldValues[field.field_id] = {
+            type: ft,
+            value: b64,
+            original_filename: entry.name,
+            content_type: entry.type || 'application/octet-stream',
+          };
+        }
+      }
+      const { data } = await api.post(`/projects/${selectedProject.id}/substitute`, {
+        field_values: fieldValues,
+      });
+      if (data.success) {
+        setContentMessage('Content accepted and processed. Transformation prompt generated.');
+        setPreviewVersion((v) => v + 1);
+      } else {
+        const errs = (data.validation_report?.hard_failures || [])
+          .map((f: any) => `${f.field_id}: ${f.message}`)
+          .join('; ');
+        setContentMessage(`Validation failed — ${errs || 'see server logs.'}`);
+      }
+    } catch (e: any) {
+      setContentMessage(`Submission failed: ${e?.response?.data?.detail || e.message}`);
+      console.error(e);
+    } finally {
+      setContentBusy(false);
+    }
+  };
 
   const fetchProjects = async () => {
     try {
@@ -282,6 +364,19 @@ export function CommandCenter() {
                 Live Preview
               </button>
               <button
+                onClick={() => setActiveTab('content')}
+                style={{
+                  background: activeTab === 'content' ? 'var(--primary)' : 'transparent',
+                  color: activeTab === 'content' ? '#000' : 'var(--text-muted)',
+                  border: activeTab === 'content' ? 'none' : '1px solid var(--panel-border)',
+                  padding: '8px 16px',
+                  borderRadius: '6px',
+                  fontSize: '0.9rem'
+                }}
+              >
+                Content Editor
+              </button>
+              <button
                 onClick={() => setActiveTab('code')}
                 style={{
                   background: activeTab === 'code' ? 'var(--primary)' : 'transparent',
@@ -370,6 +465,69 @@ export function CommandCenter() {
                       style={{ width: '100%', height: '100%', border: 'none', background: '#fff' }}
                     />
                   </div>
+                </div>
+              )}
+
+              {activeTab === 'content' && (
+                <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '16px', padding: '8px' }}>
+                  <p style={{ margin: 0, fontSize: '0.85rem', color: 'var(--text-muted)' }}>
+                    Provide your own content to substitute into this layout — text, images, video, audio, or documents (PDF/DOCX/TXT).
+                  </p>
+                  {fileLoading ? (
+                    <div style={{ color: 'var(--text-muted)' }}>Loading form schema…</div>
+                  ) : schemaFields.length === 0 ? (
+                    <p style={{ color: 'var(--text-muted)' }}>{contentMessage || 'No fillable fields detected.'}</p>
+                  ) : (
+                    <>
+                      {schemaFields.map((field) => {
+                        const ft = field.field_type;
+                        const isFile = ['image', 'video', 'audio', 'document'].includes(ft);
+                        const accept =
+                          ft === 'image' ? 'image/*' :
+                          ft === 'video' ? 'video/*' :
+                          ft === 'audio' ? 'audio/*' :
+                          ft === 'document' ? '.pdf,.docx,.txt,.md,.csv,.html' : undefined;
+                        return (
+                          <div key={field.field_id} style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                            <label style={{ fontSize: '0.85rem', color: '#dfdfe6' }}>
+                              {field.label || field.field_id}
+                              <span style={{ color: 'var(--text-muted)', marginLeft: '8px', fontSize: '0.75rem' }}>
+                                ({ft}{field.required ? ', required' : ''})
+                              </span>
+                            </label>
+                            {ft === 'textarea' ? (
+                              <textarea
+                                rows={3}
+                                value={contentValues[field.field_id] || ''}
+                                onChange={(e) => setContentValues((v) => ({ ...v, [field.field_id]: e.target.value }))}
+                                style={{ width: '100%', background: '#050608', color: '#dfdfe6', border: '1px solid var(--panel-border)', borderRadius: '6px', padding: '8px' }}
+                              />
+                            ) : isFile ? (
+                              <input
+                                type="file"
+                                accept={accept}
+                                onChange={(e) => setContentValues((v) => ({ ...v, [field.field_id]: e.target.files?.[0] }))}
+                                style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}
+                              />
+                            ) : (
+                              <input
+                                type={ft === 'url' ? 'url' : 'text'}
+                                value={contentValues[field.field_id] || ''}
+                                onChange={(e) => setContentValues((v) => ({ ...v, [field.field_id]: e.target.value }))}
+                                style={{ width: '100%', background: '#050608', color: '#dfdfe6', border: '1px solid var(--panel-border)', borderRadius: '6px', padding: '8px' }}
+                              />
+                            )}
+                          </div>
+                        );
+                      })}
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '16px', marginTop: '8px' }}>
+                        <button onClick={submitContent} disabled={contentBusy} className="btn-primary" style={{ padding: '8px 16px', fontSize: '0.85rem' }}>
+                          {contentBusy ? 'Processing…' : 'Apply Content'}
+                        </button>
+                        {contentMessage && <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>{contentMessage}</span>}
+                      </div>
+                    </>
+                  )}
                 </div>
               )}
 

@@ -23,3 +23,11 @@ def test_run_id_derivation_matches_storage_naming():
 
     assert _run_id_for_url("https://www.example.com/path") == "example.com"
     assert _run_id_for_url("http://sub.site.org:8080/") == "sub.site.org_8080"
+
+
+def test_substitute_endpoint_requires_auth(client):
+    response = client.post(
+        "/api/projects/1/substitute",
+        json={"field_values": {"headline": {"type": "text", "value": "Hi"}}},
+    )
+    assert response.status_code in (401, 403)
