@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Target, Activity, FolderGit2 } from 'lucide-react';
+import { Sparkles, Activity, FolderGit2 } from 'lucide-react';
 import api from '../api';
 
 export default function TelemetryConsole() {
@@ -232,28 +232,31 @@ export function CommandCenter() {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
-      <div className="glass-panel">
+      <div>
         <h2 style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-          <Target size={24} color="var(--primary)" /> Initialization Vector
+          <Sparkles size={22} color="var(--primary)" /> Reconstruct a website
         </h2>
-        <p style={{ marginBottom: '20px' }}>Provide a target domain for semantic reconstruction.</p>
-        
-        <form onSubmit={handleReconstruct} style={{ display: 'flex', gap: '16px' }}>
-          <input 
-            type="url" 
-            placeholder="https://example.com" 
-            value={url} 
+        <p style={{ marginBottom: '16px' }}>
+          Paste a URL to clone its layout and repurpose it with your own content.
+        </p>
+
+        <form onSubmit={handleReconstruct} className="composer">
+          <input
+            type="url"
+            placeholder="https://example.com"
+            value={url}
             onChange={e => setUrl(e.target.value)}
-            style={{ flex: 1 }}
             required
           />
-          <button type="submit" className="btn-primary">Initiate Extraction</button>
+          <button type="submit" className="btn-primary" disabled={!url}>
+            Reconstruct
+          </button>
         </form>
       </div>
 
-      <div className="glass-panel">
-        <h2 style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '20px' }}>
-          <FolderGit2 size={24} color="var(--primary)" /> Extracted Templates
+      <div>
+        <h2 style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '16px' }}>
+          <FolderGit2 size={22} color="var(--primary)" /> Your reconstructions
         </h2>
         
         {projects.length === 0 ? (
