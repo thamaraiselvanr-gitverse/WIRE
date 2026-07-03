@@ -83,6 +83,18 @@ class DesignTokenSystem:
             return f"rgb({rgb[0]}, {rgb[1]}, {rgb[2]})"
         return "#{:02x}{:02x}{:02x}".format(*rgb)
 
+    @classmethod
+    def _build_remap(cls, from_colors: dict, to_colors: dict) -> Dict[str, str]:
+        """Map normalized source color -> target color, matched by token role."""
+        remap = {}
+        for role, src_val in from_colors.items():
+            if role in to_colors:
+                src_hex = cls._normalize_hex(src_val)
+                dst_hex = cls._normalize_hex(to_colors[role])
+                if src_hex and dst_hex:
+                    remap[src_hex] = dst_hex
+        return remap
+
     def swap_tokens_in_cids(
         self, node: ComponentNode, to_template_id: str, from_template_id: str
     ) -> ComponentNode:
@@ -90,16 +102,18 @@ class DesignTokenSystem:
         the corresponding ``to_template_id`` colors by shared token role."""
         src = (self.store.get(from_template_id) or {}).get("colors", {})
         dst = (self.store.get(to_template_id) or {}).get("colors", {})
+        return self.apply_palette(node, {"colors": dst}, {"colors": src})
 
-        # Map: normalized source color value -> target color value (by role).
-        remap = {}
-        for role, src_val in src.items():
-            if role in dst:
-                src_hex = self._normalize_hex(src_val)
-                dst_hex = self._normalize_hex(dst[role])
-                if src_hex and dst_hex:
-                    remap[src_hex] = dst_hex
-
+    def apply_palette(
+        self, node: ComponentNode, to_tokens: dict, from_tokens: dict
+    ) -> ComponentNode:
+        """Return a copy of ``node`` with ``from_tokens`` colors remapped to the
+        corresponding ``to_tokens`` colors (brand transfer), using explicit token
+        dicts rather than stored ids. Value format is preserved per node."""
+        remap = self._build_remap(
+            (from_tokens or {}).get("colors", {}),
+            (to_tokens or {}).get("colors", {}),
+        )
         result = copy.deepcopy(node)
         self._apply_remap(result, remap)
         return result

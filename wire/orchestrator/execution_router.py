@@ -923,3 +923,87 @@ class ExecutionRouter:
             validation_report=validation_report,
             transformation_prompt=prompt,
         )
+
+    def apply_brand(self, run_id: str, brand_tokens: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Brand-transfer API: apply a brand's design tokens (colors) onto a stored
+        run's CIDS layout, preserving structure. Remaps the run's own palette to
+        the brand palette by shared token role, recompiles all outputs
+        (editable HTML / React / Vue), and saves a new template version.
+
+        Args:
+            run_id: The stored run directory to restyle.
+            brand_tokens: A design-tokens dict (at least ``{"colors": {...}}``)
+                whose palette should be applied onto the layout.
+
+        Returns:
+            A summary dict with the number of colors remapped and the outputs
+            regenerated.
+        """
+        logger.info("apply_brand_started", run_id=run_id)
+
+        run_dir = os.path.join(self.storage.base_dir, run_id)
+        if not os.path.exists(run_dir):
+            raise ValueError(f"Run directory not found: {run_dir}")
+
+        cids_path = os.path.join(run_dir, "schema_cids.json")
+        if not os.path.exists(cids_path):
+            raise ValueError(f"CIDS schema not found: {cids_path}")
+
+        with open(cids_path, "r", encoding="utf-8") as f:
+            cids = CanonicalDesignSchema.model_validate(json.load(f))
+
+        # The run's own palette is the "from" side of the swap.
+        from_tokens: Dict[str, Any] = {"colors": dict(cids.tokens.colors)}
+        design_arch_path = os.path.join(run_dir, "design_architecture.json")
+        if os.path.exists(design_arch_path):
+            try:
+                with open(design_arch_path, "r", encoding="utf-8") as f:
+                    arch = json.load(f)
+                if isinstance(arch.get("colors"), dict) and arch["colors"]:
+                    from_tokens = {"colors": arch["colors"]}
+            except Exception:
+                pass
+
+        remap = self.token_system._build_remap(
+            from_tokens.get("colors", {}), (brand_tokens or {}).get("colors", {})
+        )
+        cids.root = self.token_system.apply_palette(
+            cids.root, brand_tokens or {}, from_tokens
+        )
+        # Reflect the new brand palette in the schema's token block too.
+        if (brand_tokens or {}).get("colors"):
+            cids.tokens.colors = dict(brand_tokens["colors"])
+
+        # Persist the restyled CIDS and recompile every output.
+        with open(cids_path, "w", encoding="utf-8") as f:
+            f.write(cids.model_dump_json(indent=2))
+
+        outputs = []
+        editable_html = self.html_compiler.compile_document(cids)
+        with open(
+            os.path.join(run_dir, "output_editable.html"), "w", encoding="utf-8"
+        ) as f:
+            f.write(editable_html)
+        outputs.append("output_editable.html")
+
+        with open(
+            os.path.join(run_dir, "output_react.jsx"), "w", encoding="utf-8"
+        ) as f:
+            f.write(self.react_adapter.compile(cids))
+        outputs.append("output_react.jsx")
+
+        with open(os.path.join(run_dir, "output_vue.vue"), "w", encoding="utf-8") as f:
+            f.write(self.vue_adapter.compile(cids))
+        outputs.append("output_vue.vue")
+
+        self.versioning.save_version(run_id, cids.model_dump())
+
+        logger.info("apply_brand_completed", run_id=run_id, colors_remapped=len(remap))
+        return {
+            "success": True,
+            "run_id": run_id,
+            "colors_remapped": len(remap),
+            "recompilation_triggered": True,
+            "outputs": outputs,
+        }
