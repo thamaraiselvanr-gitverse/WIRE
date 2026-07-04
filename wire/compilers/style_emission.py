@@ -7,10 +7,37 @@ such styles and emits a single stylesheet. This module centralizes that logic so
 the HTML, React, and Vue outputs stay consistent.
 """
 
+import re
 from typing import Dict, List, Optional, Tuple
 
 from wire.compilers.sanitizer import HtmlSanitizer
 from wire.schema.canonical import ComponentNode
+
+_URL_REF_RE = re.compile(r"url\(\s*(['\"]?)([^'\")]+?)\1\s*\)")
+
+
+def _localize_global_url_refs(rule: str) -> str:
+    """Relocate bare same-folder ``url()`` references under ``assets/``.
+
+    The asset downloader rewrites ``url()`` inside an *external* CSS file to a
+    bare ``<hash>_name.ext`` (relative to ``assets/``, where that CSS lives).
+    But ``@font-face``/``@keyframes`` rules are hoisted verbatim into the
+    editable output's ``<style>``, and that document sits at the run root — so a
+    bare name resolves to ``<root>/name`` instead of ``<root>/assets/name`` and
+    the webfont fails to load. Inline-``<style>`` sources are already
+    ``assets/``-prefixed (they contain a ``/``) and are left untouched, as are
+    absolute URLs, ``data:`` URIs, and SVG fragment refs. This restores parity
+    with the pixel-faithful clone for external-CSS webfonts.
+    """
+
+    def repl(match: "re.Match[str]") -> str:
+        quote, value = match.group(1), match.group(2)
+        v = value.strip()
+        if not v or v[0] == "#" or v.startswith("data:") or "/" in v or ":" in v:
+            return match.group(0)
+        return f"url({quote}assets/{v}{quote})"
+
+    return _URL_REF_RE.sub(repl, rule)
 
 
 def _sanitize_props(props: dict) -> dict:
@@ -23,13 +50,14 @@ def _sanitize_props(props: dict) -> dict:
 
 
 def safe_global_rules(global_styles: Optional[List[str]]) -> List[str]:
-    """Filter document-level at-rules for obvious injection vectors."""
+    """Filter document-level at-rules for obvious injection vectors and relocate
+    bare ``url()`` references so webfonts resolve from the run-root output."""
     out = []
     for rule in global_styles or []:
         low = rule.lower()
         if any(bad in low for bad in ("javascript:", "expression(", "</", "<script")):
             continue
-        out.append(rule.strip())
+        out.append(_localize_global_url_refs(rule.strip()))
     return out
 
 
