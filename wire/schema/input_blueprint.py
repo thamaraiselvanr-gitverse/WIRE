@@ -1,5 +1,6 @@
+from typing import Any, Dict, Literal
+
 from pydantic import BaseModel, Field, field_validator
-from typing import Dict, Any, Literal
 
 
 class SlotConstraint(BaseModel):

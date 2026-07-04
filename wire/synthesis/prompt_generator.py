@@ -1,4 +1,5 @@
 import json
+
 import structlog
 
 logger = structlog.get_logger(__name__)
@@ -16,32 +17,40 @@ class PromptGenerator:
         prompts = []
 
         # Layout prompt
-        prompts.append({
-            "id": "layout_reconstruction",
-            "type": "layout",
-            "prompt": self._build_layout_prompt(design_data, url),
-        })
+        prompts.append(
+            {
+                "id": "layout_reconstruction",
+                "type": "layout",
+                "prompt": self._build_layout_prompt(design_data, url),
+            }
+        )
 
         # Color scheme prompt
-        prompts.append({
-            "id": "color_scheme",
-            "type": "color",
-            "prompt": self._build_color_prompt(design_data),
-        })
+        prompts.append(
+            {
+                "id": "color_scheme",
+                "type": "color",
+                "prompt": self._build_color_prompt(design_data),
+            }
+        )
 
         # Typography prompt
-        prompts.append({
-            "id": "typography_system",
-            "type": "typography",
-            "prompt": self._build_typography_prompt(design_data),
-        })
+        prompts.append(
+            {
+                "id": "typography_system",
+                "type": "typography",
+                "prompt": self._build_typography_prompt(design_data),
+            }
+        )
 
         # Full regeneration prompt
-        prompts.append({
-            "id": "full_regeneration",
-            "type": "full",
-            "prompt": self._build_full_prompt(design_data, url),
-        })
+        prompts.append(
+            {
+                "id": "full_regeneration",
+                "type": "full",
+                "prompt": self._build_full_prompt(design_data, url),
+            }
+        )
 
         logger.info("prompts_generated", count=len(prompts))
         return prompts

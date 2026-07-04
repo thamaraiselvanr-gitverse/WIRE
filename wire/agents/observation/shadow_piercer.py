@@ -224,5 +224,7 @@ class ShadowPiercer:
             }
         """)
 
-        logger.info("shadow_dom_extraction_complete", components_found=len(shadow_content))
+        logger.info(
+            "shadow_dom_extraction_complete", components_found=len(shadow_content)
+        )
         return shadow_content

@@ -8,13 +8,13 @@ without a real slot_id.
 """
 
 import re
-import structlog
 from typing import Dict, List, Optional
+
+import structlog
 
 from wire.schema.semantic_schema import (
     SectionRole,
     WebsiteFormSchema,
-    FormField,
 )
 from wire.semantic.llm_guard import LLMGuard
 

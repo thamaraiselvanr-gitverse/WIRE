@@ -1,11 +1,13 @@
-from typing import List, Tuple, Set
+from typing import List, Set
+
 import structlog
 
+from wire.layout.section_removal_planner import SectionRemovalPlanner
 from wire.schema.canonical import ComponentNode
 from wire.schema.layout_schema import IntegrityReport, IntegrityViolation
-from wire.layout.section_removal_planner import SectionRemovalPlanner
 
 logger = structlog.get_logger(__name__)
+
 
 class StructuralIntegrityValidator:
     """
@@ -20,10 +22,10 @@ class StructuralIntegrityValidator:
         node_id = node.attributes.get("id")
         if node_id:
             ids.add(node_id.strip())
-        
+
         for child in node.children:
             ids.update(StructuralIntegrityValidator._collect_ids(child))
-        
+
         if node.shadow_root:
             ids.update(StructuralIntegrityValidator._collect_ids(node.shadow_root))
         return ids
@@ -37,7 +39,9 @@ class StructuralIntegrityValidator:
         for child in node.children:
             slots.update(StructuralIntegrityValidator._collect_slot_ids(child))
         if node.shadow_root:
-            slots.update(StructuralIntegrityValidator._collect_slot_ids(node.shadow_root))
+            slots.update(
+                StructuralIntegrityValidator._collect_slot_ids(node.shadow_root)
+            )
         return slots
 
     @staticmethod
@@ -45,8 +49,16 @@ class StructuralIntegrityValidator:
         """Collects all unique spacing property values (margins/paddings) to define the page scale."""
         scale = set()
         spacing_props = {
-            "margin", "margin-top", "margin-bottom", "margin-left", "margin-right",
-            "padding", "padding-top", "padding-bottom", "padding-left", "padding-right"
+            "margin",
+            "margin-top",
+            "margin-bottom",
+            "margin-left",
+            "margin-right",
+            "padding",
+            "padding-top",
+            "padding-bottom",
+            "padding-left",
+            "padding-right",
         }
         for prop in spacing_props:
             val = node.styles.get(prop)
@@ -54,38 +66,54 @@ class StructuralIntegrityValidator:
                 val_clean = val.strip().lower()
                 if val_clean not in ("0", "0px", "auto", "none", ""):
                     scale.add(val_clean)
-        
+
         for child in node.children:
             scale.update(StructuralIntegrityValidator._collect_spacing_scale(child))
-        
+
         if node.shadow_root:
-            scale.update(StructuralIntegrityValidator._collect_spacing_scale(node.shadow_root))
+            scale.update(
+                StructuralIntegrityValidator._collect_spacing_scale(node.shadow_root)
+            )
         return scale
 
     @staticmethod
-    def _check_orphaned_nav(node: ComponentNode, all_ids: Set[str], path: str = "root") -> List[IntegrityViolation]:
+    def _check_orphaned_nav(
+        node: ComponentNode, all_ids: Set[str], path: str = "root"
+    ) -> List[IntegrityViolation]:
         """Recursively checks for orphaned anchor links."""
         violations = []
         href = node.attributes.get("href", "").strip()
         if node.tag == "a" and href.startswith("#") and len(href) > 1:
             target_id = href[1:].split("/")[0]  # strip any subpath
             if target_id not in all_ids:
-                violations.append(IntegrityViolation(
-                    node_path=path,
-                    rule="no_orphaned_nav_entries",
-                    detail=f"Anchor points to missing ID: {target_id}",
-                ))
+                violations.append(
+                    IntegrityViolation(
+                        node_path=path,
+                        rule="no_orphaned_nav_entries",
+                        detail=f"Anchor points to missing ID: {target_id}",
+                    )
+                )
 
         for idx, child in enumerate(node.children):
             child_path = f"{path} > {child.tag}:nth-child({idx + 1})"
-            violations.extend(StructuralIntegrityValidator._check_orphaned_nav(child, all_ids, child_path))
+            violations.extend(
+                StructuralIntegrityValidator._check_orphaned_nav(
+                    child, all_ids, child_path
+                )
+            )
 
         if node.shadow_root:
-            violations.extend(StructuralIntegrityValidator._check_orphaned_nav(node.shadow_root, all_ids, f"{path} > #shadow-root"))
+            violations.extend(
+                StructuralIntegrityValidator._check_orphaned_nav(
+                    node.shadow_root, all_ids, f"{path} > #shadow-root"
+                )
+            )
         return violations
 
     @staticmethod
-    def _check_grid_capacity(node: ComponentNode, path: str = "root") -> List[IntegrityViolation]:
+    def _check_grid_capacity(
+        node: ComponentNode, path: str = "root"
+    ) -> List[IntegrityViolation]:
         """Recursively checks grid layout sanity (non-empty items and valid columns). Partial last rows are accepted."""
         violations = []
         display = node.styles.get("display", "").lower()
@@ -94,28 +122,40 @@ class StructuralIntegrityValidator:
             cols = SectionRemovalPlanner._parse_grid_columns(cols_style)
             n_items = len(node.children)
             if n_items == 0:
-                violations.append(IntegrityViolation(
-                    node_path=path,
-                    rule="no_empty_grid_cells",
-                    detail="Grid has 0 items, leaving all cells empty.",
-                ))
+                violations.append(
+                    IntegrityViolation(
+                        node_path=path,
+                        rule="no_empty_grid_cells",
+                        detail="Grid has 0 items, leaving all cells empty.",
+                    )
+                )
             elif cols <= 0:
-                violations.append(IntegrityViolation(
-                    node_path=path,
-                    rule="no_empty_grid_cells",
-                    detail=f"Grid has invalid column count: {cols}",
-                ))
+                violations.append(
+                    IntegrityViolation(
+                        node_path=path,
+                        rule="no_empty_grid_cells",
+                        detail=f"Grid has invalid column count: {cols}",
+                    )
+                )
 
         for idx, child in enumerate(node.children):
             child_path = f"{path} > {child.tag}:nth-child({idx + 1})"
-            violations.extend(StructuralIntegrityValidator._check_grid_capacity(child, child_path))
+            violations.extend(
+                StructuralIntegrityValidator._check_grid_capacity(child, child_path)
+            )
 
         if node.shadow_root:
-            violations.extend(StructuralIntegrityValidator._check_grid_capacity(node.shadow_root, f"{path} > #shadow-root"))
+            violations.extend(
+                StructuralIntegrityValidator._check_grid_capacity(
+                    node.shadow_root, f"{path} > #shadow-root"
+                )
+            )
         return violations
 
     @staticmethod
-    def _check_section_ordering(node: ComponentNode, path: str = "root") -> List[IntegrityViolation]:
+    def _check_section_ordering(
+        node: ComponentNode, path: str = "root"
+    ) -> List[IntegrityViolation]:
         """Recursively checks that ordering attributes (data-section-index / order) remain contiguous."""
         violations = []
         indices = []
@@ -139,37 +179,57 @@ class StructuralIntegrityValidator:
             indices.sort()
             expected = list(range(1, len(indices) + 1))
             if indices != expected:
-                violations.append(IntegrityViolation(
-                    node_path=path,
-                    rule="contiguous_section_ordering",
-                    detail=f"data-section-index values are not contiguous: {indices} (expected {expected})",
-                ))
+                violations.append(
+                    IntegrityViolation(
+                        node_path=path,
+                        rule="contiguous_section_ordering",
+                        detail=f"data-section-index values are not contiguous: {indices} (expected {expected})",
+                    )
+                )
 
         if orders:
             orders.sort()
             expected = list(range(1, len(orders) + 1))
             if orders != expected:
-                violations.append(IntegrityViolation(
-                    node_path=path,
-                    rule="contiguous_section_ordering",
-                    detail=f"CSS flex/grid orders are not contiguous: {orders} (expected {expected})",
-                ))
+                violations.append(
+                    IntegrityViolation(
+                        node_path=path,
+                        rule="contiguous_section_ordering",
+                        detail=f"CSS flex/grid orders are not contiguous: {orders} (expected {expected})",
+                    )
+                )
 
         for idx, child in enumerate(node.children):
             child_path = f"{path} > {child.tag}:nth-child({idx + 1})"
-            violations.extend(StructuralIntegrityValidator._check_section_ordering(child, child_path))
+            violations.extend(
+                StructuralIntegrityValidator._check_section_ordering(child, child_path)
+            )
 
         if node.shadow_root:
-            violations.extend(StructuralIntegrityValidator._check_section_ordering(node.shadow_root, f"{path} > #shadow-root"))
+            violations.extend(
+                StructuralIntegrityValidator._check_section_ordering(
+                    node.shadow_root, f"{path} > #shadow-root"
+                )
+            )
         return violations
 
     @staticmethod
-    def _check_spacing_scales(node: ComponentNode, allowed_scale: Set[str], path: str = "root") -> List[IntegrityViolation]:
+    def _check_spacing_scales(
+        node: ComponentNode, allowed_scale: Set[str], path: str = "root"
+    ) -> List[IntegrityViolation]:
         """Recursively checks that spacing values remain in the page's scale."""
         violations = []
         spacing_props = {
-            "margin", "margin-top", "margin-bottom", "margin-left", "margin-right",
-            "padding", "padding-top", "padding-bottom", "padding-left", "padding-right"
+            "margin",
+            "margin-top",
+            "margin-bottom",
+            "margin-left",
+            "margin-right",
+            "padding",
+            "padding-top",
+            "padding-bottom",
+            "padding-left",
+            "padding-right",
         }
         for prop in spacing_props:
             val = node.styles.get(prop)
@@ -178,40 +238,67 @@ class StructuralIntegrityValidator:
                 if val_clean in ("0", "0px", "auto", "none", ""):
                     continue
                 if val_clean not in allowed_scale:
-                    violations.append(IntegrityViolation(
-                        node_path=path,
-                        rule="spacing_scale_invariance",
-                        detail=f"Spacing property '{prop}: {val}' falls outside the page scale.",
-                    ))
+                    violations.append(
+                        IntegrityViolation(
+                            node_path=path,
+                            rule="spacing_scale_invariance",
+                            detail=f"Spacing property '{prop}: {val}' falls outside the page scale.",
+                        )
+                    )
 
         for idx, child in enumerate(node.children):
             child_path = f"{path} > {child.tag}:nth-child({idx + 1})"
-            violations.extend(StructuralIntegrityValidator._check_spacing_scales(child, allowed_scale, child_path))
+            violations.extend(
+                StructuralIntegrityValidator._check_spacing_scales(
+                    child, allowed_scale, child_path
+                )
+            )
 
         if node.shadow_root:
-            violations.extend(StructuralIntegrityValidator._check_spacing_scales(node.shadow_root, allowed_scale, f"{path} > #shadow-root"))
+            violations.extend(
+                StructuralIntegrityValidator._check_spacing_scales(
+                    node.shadow_root, allowed_scale, f"{path} > #shadow-root"
+                )
+            )
         return violations
 
     @staticmethod
-    def _check_dangling_slots(node: ComponentNode, removed_slots: Set[str], path: str = "root") -> List[IntegrityViolation]:
+    def _check_dangling_slots(
+        node: ComponentNode, removed_slots: Set[str], path: str = "root"
+    ) -> List[IntegrityViolation]:
         """Recursively checks that no removed slot_ids remain in the tree."""
         violations = []
         if node.slot_id and node.slot_id in removed_slots:
-            violations.append(IntegrityViolation(
-                node_path=path,
-                rule="no_dangling_slot_references",
-                detail=f"Dangling slot_id reference '{node.slot_id}' remains in tree.",
-            ))
+            violations.append(
+                IntegrityViolation(
+                    node_path=path,
+                    rule="no_dangling_slot_references",
+                    detail=f"Dangling slot_id reference '{node.slot_id}' remains in tree.",
+                )
+            )
 
         for idx, child in enumerate(node.children):
             child_path = f"{path} > {child.tag}:nth-child({idx + 1})"
-            violations.extend(StructuralIntegrityValidator._check_dangling_slots(child, removed_slots, child_path))
+            violations.extend(
+                StructuralIntegrityValidator._check_dangling_slots(
+                    child, removed_slots, child_path
+                )
+            )
 
         if node.shadow_root:
-            violations.extend(StructuralIntegrityValidator._check_dangling_slots(node.shadow_root, removed_slots, f"{path} > #shadow-root"))
+            violations.extend(
+                StructuralIntegrityValidator._check_dangling_slots(
+                    node.shadow_root, removed_slots, f"{path} > #shadow-root"
+                )
+            )
         return violations
 
-    def validate(self, original_tree: ComponentNode, mutated_tree: ComponentNode, section_node_path: str) -> IntegrityReport:
+    def validate(
+        self,
+        original_tree: ComponentNode,
+        mutated_tree: ComponentNode,
+        section_node_path: str,
+    ) -> IntegrityReport:
         """
         Validates five invariants:
         1. No orphaned nav links
@@ -223,9 +310,13 @@ class StructuralIntegrityValidator:
         violations = []
 
         # Find the node being removed in the original tree
-        lookup = SectionRemovalPlanner.find_node_by_path(original_tree, section_node_path)
+        lookup = SectionRemovalPlanner.find_node_by_path(
+            original_tree, section_node_path
+        )
         if not lookup:
-            raise ValueError(f"Section node not found in original tree: {section_node_path}")
+            raise ValueError(
+                f"Section node not found in original tree: {section_node_path}"
+            )
         section_node, _, _ = lookup
 
         # 1. No orphaned nav links

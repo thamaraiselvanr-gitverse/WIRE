@@ -8,14 +8,15 @@ Images use Layer 1 only — inconclusive defaults to NEEDS_USER_CONFIRMATION.
 """
 
 import re
-import structlog
 from typing import List, Optional
 
+import structlog
+
 from wire.schema.semantic_schema import (
+    PLACEHOLDER_CONFIDENCE_THRESHOLD,
     ContentState,
     FormFieldType,
     PlaceholderResult,
-    PLACEHOLDER_CONFIDENCE_THRESHOLD,
 )
 from wire.semantic.llm_guard import LLMGuard
 
@@ -171,9 +172,11 @@ class PlaceholderDetector:
                 return PlaceholderResult(
                     is_placeholder=True,
                     confidence=0.70,
-                    content_state=ContentState.CONFIRMED_PLACEHOLDER
-                    if 0.70 >= PLACEHOLDER_CONFIDENCE_THRESHOLD
-                    else ContentState.NEEDS_USER_CONFIRMATION,
+                    content_state=(
+                        ContentState.CONFIRMED_PLACEHOLDER
+                        if 0.70 >= PLACEHOLDER_CONFIDENCE_THRESHOLD
+                        else ContentState.NEEDS_USER_CONFIRMATION
+                    ),
                     signals=["suspiciously_short_text"],
                     replacement_slot_type=field_type.value,
                 )
@@ -286,6 +289,7 @@ class PlaceholderDetector:
             return False
 
         from collections import Counter
+
         counts = Counter(cleaned)
         has_duplicates = any(c >= 2 for c in counts.values())
 

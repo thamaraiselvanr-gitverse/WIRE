@@ -1,5 +1,5 @@
-import urllib.parse
 from playwright.async_api import BrowserContext
+
 
 class StealthManager:
     @staticmethod

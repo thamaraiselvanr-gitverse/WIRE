@@ -1,6 +1,7 @@
-import structlog
-import httpx
 import urllib.parse
+
+import httpx
+import structlog
 
 logger = structlog.get_logger(__name__)
 

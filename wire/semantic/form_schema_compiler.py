@@ -6,18 +6,19 @@ and compiles them into a WebsiteFormSchema. Never fabricates form fields
 without a real, traceable slot_id.
 """
 
-import structlog
 from typing import Dict, List, Optional
 
+import structlog
+
 from wire.schema.canonical import ComponentNode
-from wire.schema.input_blueprint import InputBlueprint, DataSlot
+from wire.schema.input_blueprint import DataSlot, InputBlueprint
 from wire.schema.semantic_schema import (
-    SectionRole,
-    ContentState,
-    FormFieldType,
     ClassifiedSection,
+    ContentState,
     FormField,
+    FormFieldType,
     RepeatableFieldGroup,
+    SectionRole,
     WebsiteFormSchema,
 )
 from wire.semantic.placeholder_detector import PlaceholderDetector
@@ -118,8 +119,14 @@ class FormSchemaCompiler:
             field_type = self._resolve_field_type(slot)
 
             # Run placeholder detection on original value
-            original_value = node.text_content or node.attributes.get("src", "") or node.attributes.get("href", "")
-            placeholder_result = self.placeholder_detector.evaluate_field(original_value, field_type)
+            original_value = (
+                node.text_content
+                or node.attributes.get("src", "")
+                or node.attributes.get("href", "")
+            )
+            placeholder_result = self.placeholder_detector.evaluate_field(
+                original_value, field_type
+            )
 
             # Determine required from existing validation logic
             required = slot.required
@@ -219,9 +226,17 @@ class FormSchemaCompiler:
 
         # Try template match
         slot_type_hint = "text"  # default
-        if "image" in slot_id.lower() or "img" in slot_id.lower() or "photo" in slot_id.lower():
+        if (
+            "image" in slot_id.lower()
+            or "img" in slot_id.lower()
+            or "photo" in slot_id.lower()
+        ):
             slot_type_hint = "image"
-        elif "url" in slot_id.lower() or "link" in slot_id.lower() or "href" in slot_id.lower():
+        elif (
+            "url" in slot_id.lower()
+            or "link" in slot_id.lower()
+            or "href" in slot_id.lower()
+        ):
             slot_type_hint = "url"
 
         template_key = (section_role, slot_type_hint)

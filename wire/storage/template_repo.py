@@ -1,7 +1,8 @@
-import os
 import json
+import os
 import shutil
 import time
+
 import structlog
 
 logger = structlog.get_logger(__name__)

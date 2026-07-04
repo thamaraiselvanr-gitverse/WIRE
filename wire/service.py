@@ -1,6 +1,8 @@
 import structlog
+
 from wire.orchestrator.execution_router import ExecutionRouter
 from wire.utils.logging import setup_logging
+
 
 class WireService:
     def __init__(self):

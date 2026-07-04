@@ -1,5 +1,6 @@
+from typing import Any, Dict, List, Optional
+
 from pydantic import BaseModel, Field
-from typing import Dict, List, Optional, Any
 
 
 class DesignTokens(BaseModel):
@@ -43,7 +44,8 @@ class CanonicalDesignSchema(BaseModel):
     global_styles: List[str] = Field(default_factory=list)
 
 
-from bs4 import BeautifulSoup, NavigableString, Comment
+from bs4 import BeautifulSoup, Comment, NavigableString
+
 from wire.compilers.sanitizer import HtmlSanitizer
 
 

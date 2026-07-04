@@ -1,12 +1,14 @@
-import os
 import base64
-import uuid
 import io
-from PIL import Image
+import os
+import uuid
+from typing import Any, Dict
+
 import structlog
-from typing import Dict, Any
+from PIL import Image
 
 logger = structlog.get_logger(__name__)
+
 
 class ImageIngestionPipeline:
     """
@@ -16,8 +18,7 @@ class ImageIngestionPipeline:
 
     @staticmethod
     def decode_and_verify(
-        b64_string: str,
-        max_size_bytes: int = 5 * 1024 * 1024  # 5MB default
+        b64_string: str, max_size_bytes: int = 5 * 1024 * 1024  # 5MB default
     ) -> bytes:
         # Strip data URL prefix if present
         if "," in b64_string:
@@ -30,7 +31,9 @@ class ImageIngestionPipeline:
 
         # Enforce size limit
         if len(decoded_bytes) > max_size_bytes:
-            raise ValueError(f"Image size ({len(decoded_bytes)} bytes) exceeds the limit of {max_size_bytes} bytes.")
+            raise ValueError(
+                f"Image size ({len(decoded_bytes)} bytes) exceeds the limit of {max_size_bytes} bytes."
+            )
 
         # Verify magic bytes
         ImageIngestionPipeline._verify_magic_bytes(decoded_bytes)
@@ -38,16 +41,16 @@ class ImageIngestionPipeline:
 
     @staticmethod
     def process(
-        b64_string: str,
-        target_dir: str,
-        max_size_bytes: int = 5 * 1024 * 1024
+        b64_string: str, target_dir: str, max_size_bytes: int = 5 * 1024 * 1024
     ) -> Dict[str, Any]:
         """
         Processes image from base64 string, saves to target_dir/user_uploads/,
         and returns details of the sanitized image.
         """
-        decoded_bytes = ImageIngestionPipeline.decode_and_verify(b64_string, max_size_bytes)
-        
+        decoded_bytes = ImageIngestionPipeline.decode_and_verify(
+            b64_string, max_size_bytes
+        )
+
         # Load through Pillow
         try:
             img = Image.open(io.BytesIO(decoded_bytes))
@@ -98,7 +101,7 @@ class ImageIngestionPipeline:
             original_size=len(decoded_bytes),
             sanitized_size=len(sanitized_bytes),
             dimensions=f"{img.width}x{img.height}",
-            path=relative_reference
+            path=relative_reference,
         )
 
         return {
@@ -106,15 +109,17 @@ class ImageIngestionPipeline:
             "width": img.width,
             "height": img.height,
             "file_size": len(sanitized_bytes),
-            "content_type": f"image/{ext}"
+            "content_type": f"image/{ext}",
         }
 
     @staticmethod
     def _verify_magic_bytes(data: bytes) -> None:
-        if len(data) >= 8 and data[:8] == b'\x89PNG\r\n\x1a\n':
+        if len(data) >= 8 and data[:8] == b"\x89PNG\r\n\x1a\n":
             return  # PNG
-        if len(data) >= 3 and data[:3] == b'\xff\xd8\xff':
+        if len(data) >= 3 and data[:3] == b"\xff\xd8\xff":
             return  # JPEG
-        if len(data) >= 12 and data[:4] == b'RIFF' and data[8:12] == b'WEBP':
+        if len(data) >= 12 and data[:4] == b"RIFF" and data[8:12] == b"WEBP":
             return  # WebP
-        raise ValueError("Magic-byte verification failed: Unsupported or invalid image format.")
+        raise ValueError(
+            "Magic-byte verification failed: Unsupported or invalid image format."
+        )

@@ -46,14 +46,20 @@ class InteractionFuzzer:
                 elements = await page.query_selector_all(selector)
                 for el in elements:
                     tag = await el.evaluate("el => el.tagName")
-                    text = (await el.inner_text()).strip()[:80] if await el.is_visible() else ""
+                    text = (
+                        (await el.inner_text()).strip()[:80]
+                        if await el.is_visible()
+                        else ""
+                    )
                     bbox = await el.bounding_box()
-                    results["clickable"].append({
-                        "selector": selector,
-                        "tag": tag,
-                        "text": text,
-                        "bbox": bbox,
-                    })
+                    results["clickable"].append(
+                        {
+                            "selector": selector,
+                            "tag": tag,
+                            "text": text,
+                            "bbox": bbox,
+                        }
+                    )
             except Exception:
                 pass
 
@@ -65,10 +71,12 @@ class InteractionFuzzer:
                     if await el.is_visible():
                         bbox = await el.bounding_box()
                         if bbox:
-                            results["hoverable"].append({
-                                "selector": selector,
-                                "bbox": bbox,
-                            })
+                            results["hoverable"].append(
+                                {
+                                    "selector": selector,
+                                    "bbox": bbox,
+                                }
+                            )
             except Exception:
                 pass
 
@@ -96,7 +104,9 @@ class InteractionFuzzer:
         results["scrollable"] = scroll_containers
 
         results["total_interactive"] = (
-            len(results["clickable"]) + len(results["hoverable"]) + len(results["scrollable"])
+            len(results["clickable"])
+            + len(results["hoverable"])
+            + len(results["scrollable"])
         )
         logger.info(
             "fuzzing_complete",

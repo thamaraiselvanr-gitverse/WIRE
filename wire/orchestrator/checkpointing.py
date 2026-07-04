@@ -1,6 +1,7 @@
 import json
 import os
 import time
+
 import structlog
 
 logger = structlog.get_logger(__name__)
@@ -30,7 +31,11 @@ class CheckpointManager:
             return None
         with open(self.checkpoint_file, "r", encoding="utf-8") as f:
             state = json.load(f)
-        logger.info("checkpoint_loaded", file=self.checkpoint_file, timestamp=state.get("_timestamp"))
+        logger.info(
+            "checkpoint_loaded",
+            file=self.checkpoint_file,
+            timestamp=state.get("_timestamp"),
+        )
         return state
 
     def mark_page_done(self, state: dict, url: str) -> dict:

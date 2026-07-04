@@ -1,10 +1,13 @@
 import os
 import urllib.parse
-from wire.storage.backend import StorageBackend
-from wire.utils.config import get_config
+
 import structlog
 
+from wire.storage.backend import StorageBackend
+from wire.utils.config import get_config
+
 logger = structlog.get_logger(__name__)
+
 
 class LocalStorage(StorageBackend):
     def __init__(self):

@@ -19,7 +19,9 @@ VERIFICATION LEVEL DIRECTIVE & STATUS:
 import os
 import subprocess
 import tempfile
+
 import pytest
+
 from wire.compilers.react_adapter import ReactAdapter
 from wire.compilers.vue_adapter import VueAdapter
 from wire.schema.canonical import CanonicalDesignSchema, ComponentNode, DesignTokens
@@ -34,36 +36,35 @@ def test_cids():
             ComponentNode(
                 tag="div",
                 attributes={"class": "shadow-box"},
-                styles={"color": "rgb(255, 0, 0)", "background-color": "rgb(0, 255, 0)"},
+                styles={
+                    "color": "rgb(255, 0, 0)",
+                    "background-color": "rgb(0, 255, 0)",
+                },
                 children=[
                     ComponentNode(tag="#text", text_content="Hello from shadow root")
-                ]
+                ],
             )
-        ]
+        ],
     )
 
     my_element = ComponentNode(
         tag="my-element",
         attributes={"id": "host1"},
         shadow_root=shadow_root,
-        children=[]
+        children=[],
     )
 
     root_node = ComponentNode(
-        tag="div",
-        attributes={"id": "root"},
-        children=[my_element]
+        tag="div", attributes={"id": "root"}, children=[my_element]
     )
 
     tokens = DesignTokens(
         colors={"primary": "#ff0000", "secondary": "#00ff00"},
-        typography={"base": "Outfit"}
+        typography={"base": "Outfit"},
     )
 
     return CanonicalDesignSchema(
-        url="http://test-cids.com",
-        tokens=tokens,
-        root=root_node
+        url="http://test-cids.com", tokens=tokens, root=root_node
     )
 
 
@@ -117,14 +118,29 @@ test('renders React component with declarative shadow root', () => {
 
     try:
         # Run Vitest using Node
-        cmd = ["node", "./node_modules/vitest/vitest.mjs", "run", "--config", "vitest.config.ts", "src/TempComp.test.jsx"]
-        result = subprocess.run(cmd, cwd=frontend_dir, capture_output=True, text=True, encoding="utf-8")
+        cmd = [
+            "node",
+            "./node_modules/vitest/vitest.mjs",
+            "run",
+            "--config",
+            "vitest.config.ts",
+            "src/TempComp.test.jsx",
+        ]
+        result = subprocess.run(
+            cmd, cwd=frontend_dir, capture_output=True, text=True, encoding="utf-8"
+        )
 
         if result.returncode != 0:
-            print("Vitest STDOUT:\n", result.stdout.encode('ascii', errors='replace').decode('ascii'))
-            print("Vitest STDERR:\n", result.stderr.encode('ascii', errors='replace').decode('ascii'))
+            print(
+                "Vitest STDOUT:\n",
+                result.stdout.encode("ascii", errors="replace").decode("ascii"),
+            )
+            print(
+                "Vitest STDERR:\n",
+                result.stderr.encode("ascii", errors="replace").decode("ascii"),
+            )
 
-        assert result.returncode == 0, f"React Vitest mounting failed"
+        assert result.returncode == 0, "React Vitest mounting failed"
 
     finally:
         # Clean up temporary test files
@@ -148,7 +164,9 @@ def test_vue_compiler_compile_only(test_cids):
             f.write(compiled_vue)
 
         # Handle paths safely for JS string interpolation
-        vue_compiler_path_js = os.path.abspath("tests/fixtures/vue-compiler.js").replace("\\", "/")
+        vue_compiler_path_js = os.path.abspath(
+            "tests/fixtures/vue-compiler.js"
+        ).replace("\\", "/")
         vue_file_path_js = vue_file_path.replace("\\", "/")
 
         # Create validation runner JS file
@@ -191,8 +209,13 @@ try {{
         result = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8")
 
         if result.returncode != 0:
-            print("Vue compile check STDOUT:\n", result.stdout.encode('ascii', errors='replace').decode('ascii'))
-            print("Vue compile check STDERR:\n", result.stderr.encode('ascii', errors='replace').decode('ascii'))
+            print(
+                "Vue compile check STDOUT:\n",
+                result.stdout.encode("ascii", errors="replace").decode("ascii"),
+            )
+            print(
+                "Vue compile check STDERR:\n",
+                result.stderr.encode("ascii", errors="replace").decode("ascii"),
+            )
 
-        assert result.returncode == 0, f"Vue Template Compilation failed"
-
+        assert result.returncode == 0, "Vue Template Compilation failed"

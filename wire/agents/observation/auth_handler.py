@@ -3,6 +3,7 @@ from playwright.async_api import BrowserContext
 
 logger = structlog.get_logger(__name__)
 
+
 class AuthHandler:
     @staticmethod
     async def inject_session(context: BrowserContext, cookies: list[dict]) -> None:

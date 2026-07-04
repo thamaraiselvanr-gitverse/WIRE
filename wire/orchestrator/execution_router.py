@@ -1,27 +1,39 @@
 import json
 import os
+from typing import Any, Dict, List, Optional
+
 import structlog
-from typing import Dict, Any, List, Optional
 
 from wire.agents.exploration.crawler import Crawler
 from wire.agents.exploration.fuzzer import InteractionFuzzer
 from wire.agents.exploration.region_probe import RegionProbe
-from wire.agents.observation.browser_session import BrowserSession
-from wire.agents.observation.viewport_renderer import ViewportRenderer
-from wire.agents.observation.auth_handler import AuthHandler
-from wire.agents.observation.shadow_piercer import ShadowPiercer
-from wire.agents.observation.spa_detector import SPADetector
 from wire.agents.extraction.asset_downloader import AssetDownloader
 from wire.agents.extraction.design_analyzer import DesignAnalyzer
 from wire.agents.extraction.interaction_recorder import InteractionRecorder
 from wire.agents.extraction.legal_detector import LegalDetector
 from wire.agents.extraction.network_monitor import NetworkMonitor
-from wire.storage.local import LocalStorage
-from wire.storage.template_repo import TemplateRepository
-from wire.utils.fidelity_scorer import FidelityScorer
-from wire.orchestrator.scheduler import TaskScheduler
-from wire.orchestrator.coordinator import Coordinator
+from wire.agents.observation.auth_handler import AuthHandler
+from wire.agents.observation.browser_session import BrowserSession
+from wire.agents.observation.shadow_piercer import ShadowPiercer
+from wire.agents.observation.spa_detector import SPADetector
+from wire.agents.observation.viewport_renderer import ViewportRenderer
+from wire.compilers.html_compiler import HTMLCompiler
+from wire.compilers.react_adapter import ReactAdapter
+from wire.compilers.vue_adapter import VueAdapter
+from wire.generation.document_ingestion import DocumentIngestionPipeline
+from wire.generation.image_ingestion import ImageIngestionPipeline
+from wire.generation.media_ingestion import MediaIngestionPipeline
+from wire.generation.submission_validator import SubmissionValidator
+from wire.generation.substitution_mapper import SubstitutionMapper
+from wire.generation.transformation_prompt_generator import (
+    TransformationPromptGenerator,
+)
+from wire.layout.layout_reflow_engine import LayoutReflowEngine
+from wire.layout.section_removal_planner import SectionRemovalPlanner
+from wire.layout.structural_integrity_validator import StructuralIntegrityValidator
 from wire.orchestrator.checkpointing import CheckpointManager
+from wire.orchestrator.coordinator import Coordinator
+from wire.orchestrator.scheduler import TaskScheduler
 from wire.orchestrator.semantic_merger import SemanticMerger
 from wire.schema.canonical import (
     CanonicalDesignSchema,
@@ -29,56 +41,42 @@ from wire.schema.canonical import (
     DesignTokens,
     HTMLToCidsParser,
 )
-from wire.schema.style_mapper import CascadeResolver
-from wire.schema.input_blueprint import InputBlueprint, DataSlot, SlotConstraint
-from wire.compilers.html_compiler import HTMLCompiler
-from wire.compilers.react_adapter import ReactAdapter
-from wire.compilers.vue_adapter import VueAdapter
-from wire.validation.visual_diff import VisualDiff
-from wire.validation.structural import StructuralValidator
-from wire.synthesis.prompt_generator import PromptGenerator
-from wire.synthesis.knowledge_index import KnowledgeIndex
-from wire.templates.registry import TemplateRegistry
-from wire.templates.tokens import DesignTokenSystem
-from wire.templates.artifact import WireArtifact
-from wire.templates.composer import TemplateComposer
-from wire.templates.versioning import TemplateVersioning
-from wire.templates.preview import TemplatePreview
-from wire.semantic.llm_guard import LLMGuard
-from wire.semantic.section_classifier import SectionClassifier
-from wire.semantic.placeholder_detector import PlaceholderDetector
-from wire.semantic.form_schema_compiler import FormSchemaCompiler
-from wire.semantic.intent_reconciler import IntentReconciler
-from wire.semantic.profiles.portfolio_profile import PortfolioProfile
+from wire.schema.input_blueprint import DataSlot, InputBlueprint, SlotConstraint
 from wire.schema.layout_schema import (
-    RemovalPlan,
-    ReflowAction,
     IntegrityReport,
     IntegrityViolation,
     RemovalResult,
 )
-from wire.layout.section_removal_planner import SectionRemovalPlanner
-from wire.layout.layout_reflow_engine import LayoutReflowEngine
-from wire.layout.structural_integrity_validator import StructuralIntegrityValidator
+from wire.schema.style_mapper import CascadeResolver
 from wire.schema.submission_schema import (
-    SubmissionPayload,
-    SubmissionResult,
-    ValidationSummary,
-    ValidationItem,
-    ImageValue,
-    VideoValue,
     AudioValue,
     DocumentValue,
+    ImageValue,
     RepeatableGroupValue,
+    SubmissionPayload,
+    SubmissionResult,
+    ValidationItem,
+    VideoValue,
 )
-from wire.generation.submission_validator import SubmissionValidator
-from wire.generation.image_ingestion import ImageIngestionPipeline
-from wire.generation.media_ingestion import MediaIngestionPipeline
-from wire.generation.document_ingestion import DocumentIngestionPipeline
-from wire.generation.substitution_mapper import SubstitutionMapper
-from wire.generation.transformation_prompt_generator import (
-    TransformationPromptGenerator,
-)
+from wire.semantic.form_schema_compiler import FormSchemaCompiler
+from wire.semantic.intent_reconciler import IntentReconciler
+from wire.semantic.llm_guard import LLMGuard
+from wire.semantic.placeholder_detector import PlaceholderDetector
+from wire.semantic.profiles.portfolio_profile import PortfolioProfile
+from wire.semantic.section_classifier import SectionClassifier
+from wire.storage.local import LocalStorage
+from wire.storage.template_repo import TemplateRepository
+from wire.synthesis.knowledge_index import KnowledgeIndex
+from wire.synthesis.prompt_generator import PromptGenerator
+from wire.templates.artifact import WireArtifact
+from wire.templates.composer import TemplateComposer
+from wire.templates.preview import TemplatePreview
+from wire.templates.registry import TemplateRegistry
+from wire.templates.tokens import DesignTokenSystem
+from wire.templates.versioning import TemplateVersioning
+from wire.utils.fidelity_scorer import FidelityScorer
+from wire.validation.structural import StructuralValidator
+from wire.validation.visual_diff import VisualDiff
 
 logger = structlog.get_logger(__name__)
 
@@ -868,8 +866,8 @@ class ExecutionRouter:
             form_schema_data = json.load(f)
 
         # Determine Pydantic class to validate
-        from wire.schema.semantic_schema import WebsiteFormSchema
         from wire.schema.portfolio_schema import PortfolioFormSchema
+        from wire.schema.semantic_schema import WebsiteFormSchema
 
         if "portfolio_form_schema" in form_schema_path:
             form_schema = PortfolioFormSchema.model_validate(form_schema_data)

@@ -8,10 +8,10 @@ validation — this module handles only the transport layer.
 
 import json
 import os
-import structlog
-from typing import Any, Optional
+from typing import Optional
 
 import google.generativeai as genai
+import structlog
 
 logger = structlog.get_logger(__name__)
 
@@ -92,7 +92,9 @@ class LLMClient:
 
             result = json.loads(response.text)
             if not isinstance(result, dict):
-                logger.warning("llm_client_non_dict_response", type=type(result).__name__)
+                logger.warning(
+                    "llm_client_non_dict_response", type=type(result).__name__
+                )
                 return None
 
             logger.info("llm_client_response_received", keys=list(result.keys()))

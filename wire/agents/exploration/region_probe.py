@@ -1,5 +1,5 @@
 import structlog
-from playwright.async_api import Page, Browser
+from playwright.async_api import Browser
 
 logger = structlog.get_logger(__name__)
 
@@ -25,7 +25,9 @@ class RegionProbe:
         asset_dir: str,
         proxies: dict = None,
     ) -> dict:
-        logger.info("starting_multi_region_capture", url=url, regions=list(self.REGIONS.keys()))
+        logger.info(
+            "starting_multi_region_capture", url=url, regions=list(self.REGIONS.keys())
+        )
         results = {}
         proxies = proxies or {}
 
@@ -45,6 +47,7 @@ class RegionProbe:
 
                 # Capture screenshot
                 import os
+
                 screenshot_path = os.path.join(asset_dir, f"region_{region_name}.png")
                 await page.screenshot(path=screenshot_path, full_page=True)
 
@@ -67,7 +70,9 @@ class RegionProbe:
 
                 logger.info("region_captured", region=region_name)
             except Exception as e:
-                logger.warning("region_capture_failed", region=region_name, error=str(e))
+                logger.warning(
+                    "region_capture_failed", region=region_name, error=str(e)
+                )
                 results[region_name] = {"error": str(e)}
 
         logger.info("multi_region_capture_complete", regions_captured=len(results))

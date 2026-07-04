@@ -1,5 +1,6 @@
 from abc import ABC, abstractmethod
 
+
 class StorageBackend(ABC):
     @abstractmethod
     def initialize_for_url(self, url: str) -> None:

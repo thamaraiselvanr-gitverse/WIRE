@@ -1,7 +1,9 @@
-from sqlalchemy import Column, Integer, String, Boolean, DateTime, ForeignKey, Float
+from sqlalchemy import Boolean, Column, DateTime, Float, ForeignKey, Integer, String
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
+
 from .database import Base
+
 
 class User(Base):
     __tablename__ = "users"
@@ -34,9 +36,11 @@ class Project(Base):
 class TemplateMeta(Base):
     __tablename__ = "templates"
 
-    id = Column(String, primary_key=True)  # Cryptographic ID from our pipeline e.g. 13dc44d78d8e
+    id = Column(
+        String, primary_key=True
+    )  # Cryptographic ID from our pipeline e.g. 13dc44d78d8e
     project_id = Column(Integer, ForeignKey("projects.id"))
     tags = Column(String, nullable=True)  # JSON string of tags
     file_path = Column(String, nullable=False)
-    
+
     project = relationship("Project", back_populates="template")

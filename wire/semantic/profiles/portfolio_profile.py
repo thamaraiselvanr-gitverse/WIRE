@@ -26,7 +26,6 @@ from wire.schema.portfolio_schema import (
 )
 from wire.schema.semantic_schema import (
     FormField,
-    RepeatableFieldGroup,
     SectionRole,
     WebsiteFormSchema,
 )
@@ -49,20 +48,20 @@ class PortfolioProfile:
         SectionRole.HERO: "bio_header",
         SectionRole.ABOUT: "bio",
         SectionRole.PORTFOLIO: "projects",
-        SectionRole.TEAM: None,                # not applicable to single-person portfolio
+        SectionRole.TEAM: None,  # not applicable to single-person portfolio
         SectionRole.TESTIMONIALS: "testimonials",
         SectionRole.CONTACT: "contact",
         SectionRole.SOCIAL_LINKS: "social_links",
-        SectionRole.NAVIGATION: None,          # structural, not content
-        SectionRole.FOOTER: None,              # structural, not content
+        SectionRole.NAVIGATION: None,  # structural, not content
+        SectionRole.FOOTER: None,  # structural, not content
         SectionRole.SIDEBAR: None,
-        SectionRole.MEDIA_GALLERY: "projects", # gallery maps to projects in portfolio context
+        SectionRole.MEDIA_GALLERY: "projects",  # gallery maps to projects in portfolio context
         SectionRole.CTA: None,
         SectionRole.FAQ: None,
         SectionRole.BLOG_FEED: None,
-        SectionRole.FEATURE_GRID: "skills",    # features → skills in portfolio context
+        SectionRole.FEATURE_GRID: "skills",  # features → skills in portfolio context
         SectionRole.PRICING: None,
-        SectionRole.SERVICES: "services",      # services maps to services in portfolio
+        SectionRole.SERVICES: "services",  # services maps to services in portfolio
         SectionRole.UNKNOWN: None,
     }
 
@@ -166,9 +165,7 @@ class PortfolioProfile:
             total_fields=total_fields,
             mapped_fields=mapped_fields,
             excluded_fields=excluded_fields,
-            sections_with_fields=sum(
-                1 for s in sections if s.is_applicable
-            ),
+            sections_with_fields=sum(1 for s in sections if s.is_applicable),
             unmapped_general_sections=unmapped_general_sections,
         )
 

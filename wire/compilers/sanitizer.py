@@ -1,13 +1,28 @@
-import urllib.parse
 import re
-from bs4 import BeautifulSoup, NavigableString
+import urllib.parse
+
+from bs4 import BeautifulSoup
+
 
 class HtmlSanitizer:
     """
     Centralized HTML Sanitizer using BeautifulSoup.
     Strips script tags, event handlers, unsafe URI protocols, and CSS injections.
     """
-    UNSAFE_TAGS = {"script", "iframe", "object", "embed", "applet", "style", "meta", "noscript", "link", "title", "head"}
+
+    UNSAFE_TAGS = {
+        "script",
+        "iframe",
+        "object",
+        "embed",
+        "applet",
+        "style",
+        "meta",
+        "noscript",
+        "link",
+        "title",
+        "head",
+    }
     SAFE_PROTOCOLS = {"http", "https", "mailto", "tel", ""}
 
     @staticmethod
@@ -15,15 +30,15 @@ class HtmlSanitizer:
         """Sanitize a raw HTML fragment."""
         if not html_str:
             return ""
-        
+
         soup = BeautifulSoup(html_str, "html.parser")
-        
+
         # 1. Strip blocklisted tags
         for tag in soup.find_all(True):
             if tag.name in HtmlSanitizer.UNSAFE_TAGS:
                 tag.decompose()
                 continue
-            
+
             # 2. Sanitize attributes
             attrs = list(tag.attrs.items())
             for attr_name, attr_val in attrs:
@@ -31,13 +46,13 @@ class HtmlSanitizer:
                 if attr_name.lower().startswith("on"):
                     del tag.attrs[attr_name]
                     continue
-                
+
                 # Check URI values
                 if attr_name.lower() in {"href", "src", "action", "formaction"}:
                     if not HtmlSanitizer._is_safe_uri(attr_val):
                         del tag.attrs[attr_name]
                         continue
-                
+
                 # Sanitize style attribute
                 if attr_name.lower() == "style":
                     sanitized_style = HtmlSanitizer._sanitize_style_string(attr_val)
@@ -54,11 +69,11 @@ class HtmlSanitizer:
         if not uri:
             return True
         uri_str = str(uri).strip()
-        
+
         # Check for javascript: inline execution
         if uri_str.lower().startswith("javascript:"):
             return False
-            
+
         try:
             parsed = urllib.parse.urlparse(uri_str)
             return parsed.scheme.lower() in HtmlSanitizer.SAFE_PROTOCOLS
@@ -116,12 +131,22 @@ class HtmlSanitizer:
                         "data:application/x-font-woff",
                         "data:application/font-sfnt",
                     )
-                    if not any(u_clean.startswith(prefix) for prefix in safe_data_prefixes) or "javascript" in u_clean or "html" in u_clean:
+                    if (
+                        not any(
+                            u_clean.startswith(prefix) for prefix in safe_data_prefixes
+                        )
+                        or "javascript" in u_clean
+                        or "html" in u_clean
+                    ):
                         has_unsafe_url = True
                         break
                     continue
                 # Block browser error values, unsafe protocols, or bracket injections
-                if "javascript:" in u_clean or "expression" in u_clean or "behavior:" in u_clean:
+                if (
+                    "javascript:" in u_clean
+                    or "expression" in u_clean
+                    or "behavior:" in u_clean
+                ):
                     has_unsafe_url = True
                     break
                 if "bad url" in u_clean or "about:" in u_clean or "invalid" in u_clean:
@@ -138,13 +163,18 @@ class HtmlSanitizer:
                 continue
 
             # Clean any partial expressions or js urls within this declaration
-            cleaned_decl = re.sub(r"expression\s*\(.*?\)", "", decl, flags=re.IGNORECASE)
-            cleaned_decl = re.sub(r"url\s*\(\s*javascript:.*?\)", "", cleaned_decl, flags=re.IGNORECASE)
-            cleaned_decl = re.sub(r"behavior\s*:", "", cleaned_decl, flags=re.IGNORECASE)
+            cleaned_decl = re.sub(
+                r"expression\s*\(.*?\)", "", decl, flags=re.IGNORECASE
+            )
+            cleaned_decl = re.sub(
+                r"url\s*\(\s*javascript:.*?\)", "", cleaned_decl, flags=re.IGNORECASE
+            )
+            cleaned_decl = re.sub(
+                r"behavior\s*:", "", cleaned_decl, flags=re.IGNORECASE
+            )
             cleaned_decl = cleaned_decl.strip()
 
             if cleaned_decl and cleaned_decl not in {")", "(", "()"}:
                 safe_declarations.append(cleaned_decl)
 
         return "; ".join(safe_declarations)
-
