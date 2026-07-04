@@ -37,6 +37,12 @@ wire = "wire.main:main"
 documents = [
     "pypdf>=4.0.0",
 ]
+# PostgreSQL driver for production deployments. SQLite (via aiosqlite, already a
+# core dep) remains the zero-config default; set DATABASE_URL to a
+# postgresql+asyncpg://… URL to use Postgres.
+postgres = [
+    "asyncpg>=0.29.0",
+]
 dev = [
     "pytest>=8.1.1",
     "pytest-asyncio>=0.23.6",
