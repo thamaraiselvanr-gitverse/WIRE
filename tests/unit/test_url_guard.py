@@ -63,4 +63,3 @@ def test_real_resolve_localhost_and_invalid():
     # Real getaddrinfo: localhost resolves; a bogus TLD does not.
     assert ug._resolve("localhost")  # non-empty (loopback addrs)
     assert ug._resolve("host.invalid.nonexistent.tld.example") == []
-
