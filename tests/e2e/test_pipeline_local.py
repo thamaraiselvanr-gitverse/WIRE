@@ -71,6 +71,7 @@ async def test_full_pipeline_against_local_file(tmp_path):
         "structural_validation.json",
         "visual_fidelity_report.json",
         "dynamic_regions.json",
+        "extraction_report.json",
         "website_form_schema.json",
         "compliance_report.json",
     ]:

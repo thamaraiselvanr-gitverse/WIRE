@@ -8,6 +8,7 @@ from wire.agents.exploration.crawler import Crawler
 from wire.agents.exploration.fuzzer import InteractionFuzzer
 from wire.agents.exploration.region_probe import RegionProbe
 from wire.agents.extraction.asset_downloader import AssetDownloader
+from wire.agents.extraction.comprehensive_extractor import ComprehensiveExtractor
 from wire.agents.extraction.design_analyzer import DesignAnalyzer
 from wire.agents.extraction.interaction_recorder import InteractionRecorder
 from wire.agents.extraction.legal_detector import LegalDetector
@@ -114,6 +115,7 @@ class ExecutionRouter:
         self.shadow_piercer = ShadowPiercer()
         self.spa_detector = SPADetector()
         self.network_monitor = NetworkMonitor()
+        self.comprehensive_extractor = ComprehensiveExtractor()
         self.prompt_generator = PromptGenerator()
         self.knowledge_index = KnowledgeIndex()
 
@@ -306,6 +308,12 @@ class ExecutionRouter:
                 "api_discovery_blueprint.json",
                 {"url": page_url, "api_endpoints_discovered": api_endpoints},
             )
+
+            # ── Comprehensive design-knowledge extraction (in-browser) ──
+            # Meta/SEO, :root tokens, typography, color palette, webfonts,
+            # animations, breakpoints, icon library, a11y + component inventory.
+            extraction_report = await self.comprehensive_extractor.extract(page_obj)
+            self._save_json("extraction_report.json", extraction_report)
 
             # ── Phase 2: Viewport captures ──
             viewport_results = await self.viewport_renderer.capture_viewports(
@@ -511,7 +519,9 @@ class ExecutionRouter:
                 f.write(blueprint.model_dump_json(indent=2))
 
             # ── Editable HTML reconstruction (full standalone document) ──
-            editable_html = self.html_compiler.compile_document(cids)
+            editable_html = self.html_compiler.compile_document(
+                cids, title=extraction_report.get("title") or None
+            )
             with open(
                 os.path.join(self.storage.current_run_dir, "output_editable.html"),
                 "w",
