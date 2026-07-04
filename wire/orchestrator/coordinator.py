@@ -1,3 +1,5 @@
+from typing import Any, Set
+
 import structlog
 
 logger = structlog.get_logger(__name__)
@@ -9,7 +11,7 @@ class Coordinator:
     """
 
     def __init__(self) -> None:
-        self.locks = set()
+        self.locks: Set[Any] = set()
 
     def acquire_lock(self, resource_id: str) -> bool:
         if resource_id in self.locks:

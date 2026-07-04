@@ -19,7 +19,7 @@ class LegalDetector:
         base_url = f"{parsed.scheme}://{parsed.netloc}"
         robots_url = f"{base_url}/robots.txt"
 
-        result = {
+        result: Dict[str, Any] = {
             "url": url,
             "robots_txt": {"found": False, "content": None, "allowed": True},
             "tos_detected": False,

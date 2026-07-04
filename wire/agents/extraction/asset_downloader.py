@@ -1,7 +1,7 @@
 import os
 import re
 import urllib.parse
-from typing import Optional
+from typing import Any, List, Optional
 
 import httpx
 import structlog
@@ -20,7 +20,7 @@ class AssetDownloader:
         self, page_url: str, html_content: str, asset_dir: str
     ) -> tuple[str, list[str]]:
         soup = BeautifulSoup(html_content, "html.parser")
-        downloaded_assets = []
+        downloaded_assets: List[str] = []
 
         async def fetch_and_save(
             orig_url: str, asset_type: str, source_url: Optional[str] = None
@@ -125,7 +125,7 @@ class AssetDownloader:
         # 1. External CSS
         for tag in soup.find_all("link", rel="stylesheet"):
             if tag.get("href"):
-                new_href = await fetch_and_save(tag["href"], "link")
+                new_href = await fetch_and_save(str(tag["href"]), "link")
                 tag["href"] = new_href
                 if tag.has_attr("crossorigin"):
                     del tag["crossorigin"]
@@ -135,7 +135,7 @@ class AssetDownloader:
         # 2. External JS
         for tag in soup.find_all("script", src=True):
             if tag.get("src"):
-                new_src = await fetch_and_save(tag["src"], "script")
+                new_src = await fetch_and_save(str(tag["src"]), "script")
                 tag["src"] = new_src
                 if tag.has_attr("crossorigin"):
                     del tag["crossorigin"]
@@ -145,7 +145,7 @@ class AssetDownloader:
         # 3. Images
         for tag in soup.find_all("img", src=True):
             if tag.get("src"):
-                new_src = await fetch_and_save(tag["src"], "img")
+                new_src = await fetch_and_save(str(tag["src"]), "img")
                 tag["src"] = new_src
 
         # 3b. Responsive-image srcset + lazy-loading data attributes on <img>.
@@ -193,19 +193,23 @@ class AssetDownloader:
         # 4. Inline <style> tags
         for tag in soup.find_all("style"):
             if tag.string:
-                new_css = await process_css_text(tag.string, page_url)
-                tag.string.replace_with(new_css)
+                new_css = await process_css_text(str(tag.string), page_url)
+                tag.string.replace_with(new_css)  # type: ignore[attr-defined]
 
         # 5. Inline style= attributes
         for tag in soup.find_all(style=True):
             if tag.get("style"):
-                new_style = await process_css_text(tag["style"], page_url)
+                new_style = await process_css_text(str(tag["style"]), page_url)
                 tag["style"] = new_style
 
         return str(soup), downloaded_assets
 
     async def _process_css_urls(
-        self, css_text: str, source_url: str, asset_dir: str, downloaded_assets: list
+        self,
+        css_text: str,
+        source_url: str,
+        asset_dir: str,
+        downloaded_assets: List[Any],
     ) -> str:
         # Find all url(...)
         matches = URL_REGEX.findall(css_text)

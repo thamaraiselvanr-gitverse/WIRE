@@ -5,7 +5,7 @@ from sqlalchemy.sql import func
 from .database import Base
 
 
-class User(Base):
+class User(Base):  # type: ignore[misc]
     __tablename__ = "users"
 
     id = Column(Integer, primary_key=True, index=True)
@@ -18,7 +18,7 @@ class User(Base):
     projects = relationship("Project", back_populates="owner")
 
 
-class Project(Base):
+class Project(Base):  # type: ignore[misc]
     __tablename__ = "projects"
 
     id = Column(Integer, primary_key=True, index=True)
@@ -33,7 +33,7 @@ class Project(Base):
     template = relationship("TemplateMeta", back_populates="project", uselist=False)
 
 
-class TemplateMeta(Base):
+class TemplateMeta(Base):  # type: ignore[misc]
     __tablename__ = "templates"
 
     id = Column(

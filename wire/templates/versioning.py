@@ -59,7 +59,7 @@ class TemplateVersioning:
         """Return the full version record (including its ``data`` payload)."""
         return self._record(template_id, version)
 
-    def rollback(self, template_id: str, version: int) -> Optional[dict]:
+    def rollback(self, template_id: str, version: int) -> Optional[Dict[str, Any]]:
         """Return the raw CIDS payload of a prior version."""
         record = self._record(template_id, version)
         return record["data"] if record else None
@@ -90,7 +90,7 @@ class TemplateVersioning:
     def _root_of(data: Dict[str, Any]) -> Dict[str, Any]:
         # Accept either a full schema ({"root": {...}}) or a bare node.
         if isinstance(data, dict) and "root" in data:
-            return data["root"]
+            return data["root"]  # type: ignore[no-any-return]
         return data
 
     def _flatten(self, node: Any, path: str = "root") -> Dict[str, Any]:

@@ -1,6 +1,6 @@
 import json
 import os
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import structlog
 
@@ -164,7 +164,7 @@ class ExecutionRouter:
         # Operator-supplied credentials for authenticated capture. Shape:
         # {"cookies": [...], "headers": {...}, "storage": {"origin","local","session"}}.
         # None (default) captures anonymously.
-        self.auth_credentials: Optional[dict] = None
+        self.auth_credentials: Optional[Dict[str, Any]] = None
 
         self.enable_behavioral_capture: bool = False
         # When behavioral capture is on, also measure carousel autoplay timing
@@ -299,7 +299,7 @@ class ExecutionRouter:
             self._save_json("design_architecture.json", design_tokens)
 
             # Open a live page for interactive work
-            page_obj = await self.browser.context.new_page()
+            page_obj = await self.browser.context.new_page()  # type: ignore[union-attr]
 
             # ── Phase 4: Network monitoring (start before navigation) ──
             self.network_monitor.reset()
@@ -366,7 +366,7 @@ class ExecutionRouter:
 
             # ── Phase 5: Multi-region captures ──
             region_results = await self.region_probe.capture_regions(
-                self.browser.browser, page_url, self.storage.get_asset_path()
+                self.browser.browser, page_url, self.storage.get_asset_path()  # type: ignore[arg-type]
             )
             self._save_json("region_variants.json", region_results)
 
@@ -450,7 +450,7 @@ class ExecutionRouter:
 
                     def dict_to_node(d: Dict[str, Any]) -> ComponentNode:
                         if not d:
-                            return None
+                            return None  # type: ignore[return-value]
                         children = [dict_to_node(c) for c in d.get("children", []) if c]
                         shadow_root = (
                             dict_to_node(d["shadow_root"])
@@ -492,7 +492,9 @@ class ExecutionRouter:
             )
 
             # Adaptive node validation
-            def get_depth_and_count(node: ComponentNode, current_depth=1):
+            def get_depth_and_count(
+                node: ComponentNode, current_depth: int = 1
+            ) -> Tuple[int, int]:
                 if not node.children:
                     return current_depth, 1
                 max_d = current_depth
@@ -648,7 +650,7 @@ class ExecutionRouter:
             return None
 
         file_url = "file://" + os.path.abspath(index_path).replace(os.sep, "/")
-        recon_page = await self.browser.context.new_page()
+        recon_page = await self.browser.context.new_page()  # type: ignore[union-attr]
         try:
             await recon_page.set_viewport_size({"width": 1920, "height": 1080})
             await recon_page.goto(file_url, wait_until="networkidle", timeout=30000)
@@ -777,7 +779,7 @@ class ExecutionRouter:
 
         cids = CanonicalDesignSchema.model_validate(cids_data)
 
-        plans = []
+        plans: List[Any] = []
         current_root = cids.root
 
         # 2. Sequentially apply removals and planning
@@ -912,7 +914,9 @@ class ExecutionRouter:
         if "portfolio_form_schema" in form_schema_path:
             form_schema = PortfolioFormSchema.model_validate(form_schema_data)
         else:
-            form_schema = WebsiteFormSchema.model_validate(form_schema_data)
+            form_schema = WebsiteFormSchema.model_validate(
+                form_schema_data
+            )  # type: ignore[assignment]
 
         # 2. Strict validation (hard block on failures)
         validation_report = SubmissionValidator.validate(

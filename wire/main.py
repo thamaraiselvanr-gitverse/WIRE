@@ -1,5 +1,6 @@
 import asyncio
 import sys
+from typing import Any, Dict
 
 import uvicorn
 from fastapi import FastAPI, HTTPException
@@ -15,7 +16,7 @@ class ReconstructRequest(BaseModel):
 
 
 @app.post("/api/reconstruct")
-async def reconstruct(request: ReconstructRequest):
+async def reconstruct(request: ReconstructRequest) -> Dict[str, Any]:
     service = WireService()
     try:
         score = await service.run(request.url)
@@ -24,7 +25,7 @@ async def reconstruct(request: ReconstructRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-def main():
+def main() -> None:
     if len(sys.argv) > 1:
         if sys.argv[1] == "--server":
             print("Starting FastAPI server on port 8000...")

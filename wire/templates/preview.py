@@ -27,7 +27,7 @@ class TemplatePreview:
         os.makedirs(self.base_dir, exist_ok=True)
 
     def render_preview(
-        self, template_data: Dict[str, Any], tokens: Optional[dict] = None
+        self, template_data: Dict[str, Any], tokens: Optional[Dict[str, Any]] = None
     ) -> str:
         logger.info("rendering_template_preview")
 

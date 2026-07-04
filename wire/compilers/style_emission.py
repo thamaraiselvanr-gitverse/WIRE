@@ -139,7 +139,7 @@ def collect_generated_styles(
     encapsulation, so scoping generated classes there would be inert.
     """
     class_map: Dict[int, str] = {}
-    responsive_rules: Dict[str, list] = {}
+    responsive_rules: Dict[str, List[Any]] = {}
     pseudo_rules: List[Any] = []
     counter = [0]
 

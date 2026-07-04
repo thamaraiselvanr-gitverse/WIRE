@@ -1,7 +1,7 @@
 import base64
 import os
 import uuid
-from typing import Any, Dict, Tuple
+from typing import Any, Dict, Optional, Tuple
 
 import structlog
 
@@ -101,7 +101,7 @@ class MediaIngestionPipeline:
         }
 
     @staticmethod
-    def _detect_format(data: bytes, kind: str):
+    def _detect_format(data: bytes, kind: str) -> Optional[str]:
         if kind == "video":
             if len(data) >= 12 and data[4:8] == b"ftyp":
                 brand = data[8:12]

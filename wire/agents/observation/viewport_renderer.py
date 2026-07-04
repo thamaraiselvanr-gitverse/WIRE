@@ -23,7 +23,7 @@ class ViewportRenderer:
         results = {}
         for name, dims in self.VIEWPORTS.items():
             try:
-                await page.set_viewport_size(dims)
+                await page.set_viewport_size(dims)  # type: ignore[arg-type]
                 await page.wait_for_timeout(500)  # Settling time
                 screenshot = await page.screenshot(full_page=True)
 

@@ -71,7 +71,7 @@ class Crawler:
 
                     soup = BeautifulSoup(resp.text, "html.parser")
                     for tag in soup.find_all("a", href=True):
-                        link = urllib.parse.urljoin(page_url, tag["href"]).split(
+                        link = urllib.parse.urljoin(page_url, str(tag["href"])).split(
                             "#", 1
                         )[0]
                         link_parsed = urllib.parse.urlparse(link)

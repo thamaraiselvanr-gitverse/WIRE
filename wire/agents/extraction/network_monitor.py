@@ -1,4 +1,4 @@
-from typing import Any, Dict
+from typing import Any, Dict, List
 
 import structlog
 from playwright.async_api import Page
@@ -13,9 +13,9 @@ class NetworkMonitor:
     """
 
     def __init__(self) -> None:
-        self.captured_requests: list[dict] = []
-        self.api_endpoints: list[dict] = []
-        self.dynamic_data: list[dict] = []
+        self.captured_requests: List[Dict[str, Any]] = []
+        self.api_endpoints: List[Dict[str, Any]] = []
+        self.dynamic_data: List[Dict[str, Any]] = []
 
     async def start_monitoring(self, page: Page) -> None:
         logger.info("starting_network_monitoring")
@@ -23,7 +23,7 @@ class NetworkMonitor:
         page.on("request", self._on_request)
         page.on("response", self._on_response)
 
-    def _on_request(self, request) -> None:
+    def _on_request(self, request: Any) -> None:
         self.captured_requests.append(
             {
                 "url": request.url,
@@ -33,7 +33,7 @@ class NetworkMonitor:
             }
         )
 
-    def _on_response(self, response) -> None:
+    def _on_response(self, response: Any) -> None:
         url = response.url
         content_type = response.headers.get("content-type", "")
 
@@ -60,7 +60,7 @@ class NetworkMonitor:
             )
 
     def get_report(self) -> Dict[str, Any]:
-        report = {
+        report: Dict[str, Any] = {
             "total_requests": len(self.captured_requests),
             "api_endpoints": self.api_endpoints,
             "dynamic_data_sources": self.dynamic_data,

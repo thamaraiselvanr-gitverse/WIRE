@@ -107,4 +107,4 @@ class SPADetector:
             framework=result["framework"],
             signals=len(result["signals"]),
         )
-        return result
+        return result  # type: ignore[no-any-return]

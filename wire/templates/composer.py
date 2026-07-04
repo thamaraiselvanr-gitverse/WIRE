@@ -1,5 +1,5 @@
 import re
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Set
 
 import structlog
 
@@ -55,7 +55,7 @@ class TemplateComposer:
     }
 
     def compose(self, components: List[Dict[str, Any]]) -> Dict[str, Any]:
-        seen_ids: set = set()
+        seen_ids: Set[Any] = set()
         composed: List[Dict[str, Any]] = []
         errors: List[str] = []
 
@@ -94,5 +94,5 @@ class TemplateComposer:
     def _first_block_tag(self, content: str) -> str:
         for match in re.findall(r"<\s*([a-zA-Z0-9]+)", content):
             if match.lower() in self.BLOCK_TAGS:
-                return match.lower()
+                return match.lower()  # type: ignore[no-any-return]
         return ""

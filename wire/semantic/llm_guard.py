@@ -217,7 +217,9 @@ class LLMGuard:
 
     # ── Intent Extraction Validation ────────────────────────────────────
 
-    def validate_intent_extraction(self, response: Dict[str, Any]) -> Optional[dict]:
+    def validate_intent_extraction(
+        self, response: Dict[str, Any]
+    ) -> Optional[Dict[str, Any]]:
         """
         Validate an LLM intent extraction response.
 
@@ -227,7 +229,7 @@ class LLMGuard:
                 "sections_to_emphasize": list[str],
                 "sections_to_deprioritize": list[str],
                 "sections_to_exclude": list[str],
-                "explicit_field_overrides": list[dict]
+                "explicit_field_overrides": List[Dict[str, Any]]
             }
 
         Each section string must be a valid SectionRole value.
@@ -313,7 +315,7 @@ class LLMGuard:
 
     def prepare_classification_input(
         self, node: ComponentNode, max_depth: int = 2
-    ) -> Optional[dict]:
+    ) -> Optional[Dict[str, Any]]:
         """
         Serialize a ComponentNode for LLM classification input.
 
@@ -325,7 +327,7 @@ class LLMGuard:
             return None
 
         def serialize(n: ComponentNode, depth: int) -> Dict[str, Any]:
-            result: dict = {"tag": n.tag}
+            result: Dict[str, Any] = {"tag": n.tag}
             if n.attributes:
                 result["attributes"] = n.attributes
             if n.text_content:
@@ -352,7 +354,9 @@ class LLMGuard:
         logger.info("llm_guard_classification_input_prepared", size=len(serialized_str))
         return serialized
 
-    def prepare_placeholder_input(self, value: str, field_type: str) -> Optional[dict]:
+    def prepare_placeholder_input(
+        self, value: str, field_type: str
+    ) -> Optional[Dict[str, Any]]:
         """
         Prepare a placeholder detection input for LLM.
         Returns None if size exceeds limit or call count exceeded.
@@ -366,7 +370,7 @@ class LLMGuard:
         self._increment_call_count()
         return {"value": value, "field_type": field_type}
 
-    def prepare_intent_input(self, intent_prompt: str) -> Optional[dict]:
+    def prepare_intent_input(self, intent_prompt: str) -> Optional[Dict[str, Any]]:
         """
         Prepare intent extraction input for LLM.
         Returns None if size/count exceeded.
@@ -497,7 +501,7 @@ class LLMGuard:
         logger.warning("llm_guard_placeholder_failed_after_retry")
         return None
 
-    def call_intent(self, intent_prompt: str) -> Optional[dict]:
+    def call_intent(self, intent_prompt: str) -> Optional[Dict[str, Any]]:
         """
         Full guarded LLM intent extraction: prepare → call → validate.
         Retry-once-then-fail-closed.

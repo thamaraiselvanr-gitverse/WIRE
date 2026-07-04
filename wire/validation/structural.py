@@ -1,4 +1,4 @@
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import structlog
 from bs4 import BeautifulSoup
@@ -17,11 +17,11 @@ class StructuralValidator:
     drag the structural score — now a fidelity input — down artificially).
     """
 
-    def _build_tree(self, html: str) -> Dict[str, Any]:
+    def _build_tree(self, html: str) -> Optional[Dict[str, Any]]:
         """Build a simplified DOM tree representation."""
         soup = BeautifulSoup(html, "html.parser")
 
-        def walk(node) -> dict | None:
+        def walk(node: Any) -> Optional[Dict[str, Any]]:
             if node.name is None:
                 return None
             children = []
@@ -54,7 +54,7 @@ class StructuralValidator:
 
     @classmethod
     def _align_children(
-        cls, orig_children: List[Any], recon_children: list
+        cls, orig_children: List[Any], recon_children: List[Any]
     ) -> List[Any]:
         """
         Longest-common-subsequence alignment of two child lists keyed by
@@ -106,7 +106,9 @@ class StructuralValidator:
 
         totals = {"nodes": 0, "matches": 0.0}
 
-        def compare_nodes(orig: dict | None, recon: dict | None) -> None:
+        def compare_nodes(
+            orig: Optional[Dict[str, Any]], recon: Optional[Dict[str, Any]]
+        ) -> None:
             # An unmatched node (present in only one tree) counts as a miss.
             if orig is None or recon is None:
                 totals["nodes"] += 1

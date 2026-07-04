@@ -1,7 +1,13 @@
-from typing import Optional
+from typing import Any, Dict, Optional
 
 import structlog
-from playwright.async_api import Browser, BrowserContext, Page, async_playwright
+from playwright.async_api import (
+    Browser,
+    BrowserContext,
+    Page,
+    Playwright,
+    async_playwright,
+)
 
 from wire.agents.observation.auth_handler import AuthHandler
 from wire.agents.observation.stealth import StealthManager
@@ -11,11 +17,11 @@ logger = structlog.get_logger(__name__)
 
 
 class BrowserSession:
-    def __init__(self, credentials: Optional[dict] = None) -> None:
+    def __init__(self, credentials: Optional[Dict[str, Any]] = None) -> None:
         self.config = get_config()
-        self.playwright = None
-        self.browser: Browser = None
-        self.context: BrowserContext = None
+        self.playwright: Optional[Playwright] = None
+        self.browser: Optional[Browser] = None
+        self.context: Optional[BrowserContext] = None
         self._is_active = False
         # Optional operator-supplied auth (cookies/headers/storage) applied at
         # context creation for capturing pages behind a login.
@@ -74,6 +80,7 @@ class BrowserSession:
             raise RuntimeError("Browser session not started")
 
         logger.info("capturing_page", url=url)
+        assert self.context is not None
         page: Page = await self.context.new_page()
         try:
             await page.goto(

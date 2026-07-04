@@ -127,7 +127,7 @@ class CascadeResolver:
 
         return (0, ids, classes, tags, source_order)
 
-    def _valid_decls_from_content(self, content) -> List[Any]:
+    def _valid_decls_from_content(self, content: Any) -> List[Any]:
         """Parse a declaration-list token stream into allowed (prop, value) pairs."""
         decls = tinycss2.parse_declaration_list(
             content, skip_comments=True, skip_whitespace=True
@@ -172,7 +172,7 @@ class CascadeResolver:
         )
 
         element_styles_map = {}
-        element_specificity_map = {}
+        element_specificity_map: Dict[int, Dict[str, Any]] = {}
 
         rule_count = 0
         mapped_elements = set()

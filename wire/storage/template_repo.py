@@ -2,7 +2,7 @@ import json
 import os
 import shutil
 import time
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 import structlog
 
@@ -33,7 +33,9 @@ class TemplateRepository:
         with open(self.index_file, "w", encoding="utf-8") as f:
             json.dump(self.index, f, indent=2)
 
-    def store(self, url: str, source_dir: str, metadata: dict | None = None) -> str:
+    def store(
+        self, url: str, source_dir: str, metadata: Optional[Dict[str, Any]] = None
+    ) -> str:
         """Cache a reconstruction as a template entry."""
         import hashlib
 
@@ -64,4 +66,4 @@ class TemplateRepository:
         return None
 
     def list_templates(self) -> Dict[str, Any]:
-        return self.index["templates"]
+        return self.index["templates"]  # type: ignore[no-any-return]

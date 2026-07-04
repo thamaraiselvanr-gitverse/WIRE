@@ -49,13 +49,15 @@ class HtmlSanitizer:
 
                 # Check URI values
                 if attr_name.lower() in {"href", "src", "action", "formaction"}:
-                    if not HtmlSanitizer._is_safe_uri(attr_val):
+                    if not HtmlSanitizer._is_safe_uri(str(attr_val)):
                         del tag.attrs[attr_name]
                         continue
 
                 # Sanitize style attribute
                 if attr_name.lower() == "style":
-                    sanitized_style = HtmlSanitizer._sanitize_style_string(attr_val)
+                    sanitized_style = HtmlSanitizer._sanitize_style_string(
+                        str(attr_val)
+                    )
                     if sanitized_style:
                         tag.attrs[attr_name] = sanitized_style
                     else:

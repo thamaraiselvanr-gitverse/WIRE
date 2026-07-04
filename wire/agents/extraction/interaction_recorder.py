@@ -1,5 +1,6 @@
 import os
 import re
+from typing import Any, Dict, List
 
 import structlog
 from playwright.async_api import Page
@@ -58,8 +59,8 @@ class InteractionRecorder:
         ) != InteractionRecorder._normalize_css_value(after_val)
 
     async def record_hover_states(
-        self, page: Page, hoverable_elements: list[dict], asset_dir: str
-    ) -> list[dict]:
+        self, page: Page, hoverable_elements: List[Dict[str, Any]], asset_dir: str
+    ) -> List[Dict[str, Any]]:
         capped = hoverable_elements[:MAX_INTERACTION_LIMIT]
         logger.info(
             "recording_hover_states",

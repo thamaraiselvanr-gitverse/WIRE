@@ -1,10 +1,11 @@
 import logging
 import sys
+from typing import Any
 
 import structlog
 
 
-def sse_event_broadcaster(logger, log_method, event_dict):
+def sse_event_broadcaster(logger: Any, log_method: Any, event_dict: Any) -> Any:
     try:
         # Import dynamically to avoid circular imports if run as a CLI
         from wire.api.main_routes import log_event_queues
@@ -24,7 +25,7 @@ def sse_event_broadcaster(logger, log_method, event_dict):
     return event_dict
 
 
-def setup_logging():
+def setup_logging() -> None:
     logging.basicConfig(
         format="%(message)s",
         stream=sys.stdout,

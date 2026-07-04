@@ -1,7 +1,7 @@
 import json
 import os
 import time
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 import structlog
 
@@ -27,7 +27,7 @@ class CheckpointManager:
             json.dump(state, f, indent=2)
         logger.info("checkpoint_saved", file=self.checkpoint_file)
 
-    def load(self) -> dict | None:
+    def load(self) -> Optional[Dict[str, Any]]:
         if not os.path.exists(self.checkpoint_file):
             return None
         with open(self.checkpoint_file, "r", encoding="utf-8") as f:
@@ -37,7 +37,7 @@ class CheckpointManager:
             file=self.checkpoint_file,
             timestamp=state.get("_timestamp"),
         )
-        return state
+        return state  # type: ignore[no-any-return]
 
     def mark_page_done(self, state: Dict[str, Any], url: str) -> Dict[str, Any]:
         if "completed_pages" not in state:

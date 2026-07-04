@@ -1,4 +1,4 @@
-from typing import Annotated, Dict, List, Literal, Optional, Union
+from typing import Annotated, Any, Dict, List, Literal, Optional, Union
 
 from pydantic import BaseModel, Field
 
@@ -49,7 +49,7 @@ class DocumentValue(BaseSubmittedValue):
     extracted_text: Optional[str] = None
     # Structured understanding derived from the extracted text (title, headings,
     # summary, emails, urls, counts) so the right slot gets the right piece.
-    extracted_structure: Optional[Dict] = None
+    extracted_structure: Optional[Dict[str, Any]] = None
 
 
 class UrlValue(BaseSubmittedValue):
@@ -107,7 +107,7 @@ class SubstitutedValueRef(BaseModel):
     alt_text: Optional[str] = None
     dominant_color: Optional[str] = None
     # Structured fields (title/summary/headings/...) from an uploaded document.
-    structure: Optional[Dict] = None
+    structure: Optional[Dict[str, Any]] = None
 
 
 class ContentSubstitution(BaseModel):

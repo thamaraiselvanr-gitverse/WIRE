@@ -1,5 +1,5 @@
 import json
-from typing import Any, Dict
+from typing import Any, Dict, List
 
 import structlog
 
@@ -12,7 +12,9 @@ class PromptGenerator:
     Produces LLM-friendly descriptions for design regeneration or variation.
     """
 
-    def generate_prompts(self, design_data: Dict[str, Any], url: str) -> list[dict]:
+    def generate_prompts(
+        self, design_data: Dict[str, Any], url: str
+    ) -> List[Dict[str, Any]]:
         logger.info("generating_ai_design_prompts", url=url)
 
         prompts = []

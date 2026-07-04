@@ -35,7 +35,7 @@ class InteractionFuzzer:
 
     async def discover_elements(self, page: Page) -> Dict[str, Any]:
         logger.info("fuzzing_interactive_elements")
-        results = {
+        results: Dict[str, Any] = {
             "clickable": [],
             "hoverable": [],
             "scrollable": [],

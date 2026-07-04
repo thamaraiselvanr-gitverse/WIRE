@@ -166,7 +166,7 @@ class ReactAdapter:
                     continue
             jsx_key = self._html_attr_to_jsx(key)
             if key.lower() == "class":
-                value = merge_class(value, combined_class)
+                value = merge_class(value, combined_class) or value
                 class_emitted = True
             props_parts.append(f'{jsx_key}="{value}"')
         if combined_class and not class_emitted:

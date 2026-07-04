@@ -75,7 +75,7 @@ class VisualDiff:
             return None
         stack = np.stack(arrays, axis=0)
         spread = stack.max(axis=0) - stack.min(axis=0)
-        return np.any(spread > color_tolerance, axis=-1)
+        return np.any(spread > color_tolerance, axis=-1)  # type: ignore[no-any-return]
 
     def compare_pixel_fidelity(
         self,
@@ -261,9 +261,9 @@ class VisualDiff:
             if img_recon.convert("RGB").size != target_size:
                 resized = True
                 normalized_path = f"{reconstruction_path}.normalized.png"
-                img_recon.convert("RGB").resize(target_size, Image.LANCZOS).save(
-                    normalized_path
-                )
+                img_recon.convert("RGB").resize(
+                    target_size, Image.Resampling.LANCZOS
+                ).save(normalized_path)
 
         try:
             result = self.compare_screenshots(

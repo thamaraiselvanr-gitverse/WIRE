@@ -23,7 +23,7 @@ class InputBlueprint(BaseModel):
     slots: Dict[str, DataSlot] = Field(default_factory=dict)
 
     @field_validator("slots")
-    def validate_slots(cls, v):
+    def validate_slots(cls, v: Any) -> Any:
         for slot_id, slot in v.items():
             if slot.id != slot_id:
                 raise ValueError(f"Slot ID mismatch: {slot.id} != {slot_id}")
@@ -150,7 +150,7 @@ class InputBlueprint(BaseModel):
         """
         Validates all inputs and aggregates them into a structured report.
         """
-        report = {
+        report: Dict[str, Any] = {
             "is_valid": True,
             "hard_failures": [],
             "soft_warnings": [],

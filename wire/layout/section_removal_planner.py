@@ -193,8 +193,9 @@ class SectionRemovalPlanner:
             remaining_count = len(parent.children) - 1
             if remaining_count > 0:
                 for sib_path in affected_siblings:
-                    sib_node, _, _ = self.find_node_by_path(cids_root, sib_path)
-                    if sib_node:
+                    _found = self.find_node_by_path(cids_root, sib_path)
+                    if _found:
+                        sib_node, _, _ = _found
                         # Check width or flex-basis
                         width = sib_node.styles.get("width", "")
                         flex_basis = sib_node.styles.get("flex-basis", "")
@@ -263,8 +264,9 @@ class SectionRemovalPlanner:
         # Renumber order or data-section-index if present on remaining siblings
         section_idx = 1
         for sib_path in affected_siblings:
-            sib_node, _, _ = self.find_node_by_path(cids_root, sib_path)
-            if sib_node:
+            _found = self.find_node_by_path(cids_root, sib_path)
+            if _found:
+                sib_node, _, _ = _found
                 before_vals = {}
                 after_vals = {}
 

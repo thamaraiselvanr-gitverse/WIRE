@@ -74,7 +74,7 @@ class SubmissionValidator:
                 continue
 
             # Delegate to InputBlueprint
-            val_to_check = submitted_val.value
+            val_to_check = getattr(submitted_val, "value", "")
             res = blueprint.validate_input(
                 form_field.slot_id, val_to_check, strict=True
             )
@@ -150,7 +150,7 @@ class SubmissionValidator:
 
                     # Delegate validation
                     res = blueprint.validate_input(
-                        form_field.slot_id, val.value, strict=True
+                        form_field.slot_id, getattr(val, "value", ""), strict=True
                     )
                     if not res["valid"]:
                         hard_failures.append(

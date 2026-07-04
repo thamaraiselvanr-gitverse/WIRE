@@ -179,7 +179,7 @@ class ComprehensiveExtractor:
                 v for v in report.get("components", {}).values() if isinstance(v, int)
             ),
         )
-        return report
+        return report  # type: ignore[no-any-return]
 
     @staticmethod
     def detect_icon_library(html: str) -> str:

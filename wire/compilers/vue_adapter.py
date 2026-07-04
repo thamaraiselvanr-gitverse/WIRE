@@ -88,7 +88,7 @@ class VueAdapter:
                 if not HtmlSanitizer._is_safe_uri(value):
                     continue
             if key.lower() == "class":
-                value = merge_class(value, combined_class)
+                value = merge_class(value, combined_class) or value
                 class_emitted = True
             attrs_parts.append(f'{key}="{value}"')
         if combined_class and not class_emitted:

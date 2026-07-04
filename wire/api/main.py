@@ -1,4 +1,5 @@
 import contextlib
+from typing import Any, AsyncGenerator, Dict
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -9,7 +10,7 @@ from .main_routes import router as projects_router
 
 
 @contextlib.asynccontextmanager
-async def lifespan(app: FastAPI):
+async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
     yield
@@ -30,5 +31,5 @@ app.include_router(projects_router)
 
 
 @app.get("/api/status")
-async def get_status():
+async def get_status() -> Dict[str, Any]:
     return {"status": "operational", "version": "0.2.0-platform"}

@@ -1,6 +1,6 @@
 import json
 import os
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 import structlog
 
@@ -60,7 +60,7 @@ class KnowledgeIndex:
         token_match: Optional[str] = None,
         color_similarity_target: Optional[str] = None,
         color_similarity_threshold: float = 30.0,
-    ) -> list[dict]:
+    ) -> List[Dict[str, Any]]:
         """Query the knowledge index by category, key, token match, or color similarity."""
         results = self.entries
         if category:
@@ -117,9 +117,9 @@ class KnowledgeIndex:
     def _rgb_distance(
         self, c1: tuple[int, int, int], c2: tuple[int, int, int]
     ) -> float:
-        return (
+        return (  # type: ignore[no-any-return]
             (c1[0] - c2[0]) ** 2 + (c1[1] - c2[1]) ** 2 + (c1[2] - c2[2]) ** 2
         ) ** 0.5
 
-    def query_by_url(self, url: str) -> list[dict]:
+    def query_by_url(self, url: str) -> List[Dict[str, Any]]:
         return [e for e in self.entries if e["url"] == url]

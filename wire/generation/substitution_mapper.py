@@ -3,6 +3,7 @@ from typing import Any, List, Tuple
 from wire.schema.canonical import ComponentNode
 from wire.schema.submission_schema import (
     ContentSubstitution,
+    RepeatableGroupValue,
     SubmissionPayload,
     SubstitutedValueRef,
 )
@@ -43,7 +44,7 @@ class SubstitutionMapper:
                         original_value=form_field.original_value,
                         substituted_value=SubstitutedValueRef(
                             type=ref_type,
-                            value=submitted_val.value,
+                            value=getattr(submitted_val, "value", ""),
                             extracted_text=getattr(
                                 submitted_val, "extracted_text", None
                             ),
@@ -66,6 +67,8 @@ class SubstitutionMapper:
                 original_count = group.instance_count
                 template_fields = {f.field_id: f for f in group.template_fields}
 
+                if not isinstance(submitted_val, RepeatableGroupValue):
+                    continue
                 for inst_idx, instance in enumerate(submitted_val.instances):
                     is_new_instance = inst_idx >= original_count
 
@@ -100,7 +103,7 @@ class SubstitutionMapper:
                                     ),
                                     substituted_value=SubstitutedValueRef(
                                         type=ref_type,
-                                        value=val.value,
+                                        value=getattr(val, "value", ""),
                                         extracted_text=getattr(
                                             val, "extracted_text", None
                                         ),
@@ -112,7 +115,7 @@ class SubstitutionMapper:
                                             val, "extracted_structure", None
                                         ),
                                     ),
-                                    substitution_type=sub_type,
+                                    substitution_type=sub_type,  # type: ignore[arg-type]
                                 )
                             )
 

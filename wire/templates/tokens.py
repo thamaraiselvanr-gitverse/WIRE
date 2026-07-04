@@ -2,7 +2,7 @@ import copy
 import json
 import os
 import re
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Tuple
 
 import structlog
 
@@ -24,7 +24,7 @@ class DesignTokenSystem:
         self.base_dir = base_dir
         os.makedirs(self.base_dir, exist_ok=True)
         self.tokens_path = os.path.join(self.base_dir, "tokens.json")
-        self.store: Dict[str, dict] = {}
+        self.store: Dict[str, Dict[str, Any]] = {}
         self._load()
 
     def _load(self) -> None:
@@ -44,12 +44,12 @@ class DesignTokenSystem:
         self._save()
         logger.info("design_tokens_saved", id=template_id)
 
-    def get_tokens(self, template_id: str) -> Optional[dict]:
+    def get_tokens(self, template_id: str) -> Optional[Dict[str, Any]]:
         return self.store.get(template_id)
 
     # ── color helpers ──
     @staticmethod
-    def _to_rgb(value: str) -> Optional[tuple]:
+    def _to_rgb(value: str) -> Optional[Tuple[Any, ...]]:
         v = value.strip().lower()
         m = re.match(r"rgba?\(([^)]+)\)", v)
         if m:
@@ -85,7 +85,7 @@ class DesignTokenSystem:
 
     @classmethod
     def _build_remap(
-        cls, from_colors: Dict[str, Any], to_colors: dict
+        cls, from_colors: Dict[str, Any], to_colors: Dict[str, Any]
     ) -> Dict[str, str]:
         """Map normalized source color -> target color, matched by token role."""
         remap = {}
@@ -107,7 +107,10 @@ class DesignTokenSystem:
         return self.apply_palette(node, {"colors": dst}, {"colors": src})
 
     def apply_palette(
-        self, node: ComponentNode, to_tokens: Dict[str, Any], from_tokens: dict
+        self,
+        node: ComponentNode,
+        to_tokens: Dict[str, Any],
+        from_tokens: Dict[str, Any],
     ) -> ComponentNode:
         """Return a copy of ``node`` with ``from_tokens`` colors remapped to the
         corresponding ``to_tokens`` colors (brand transfer), using explicit token
