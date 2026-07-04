@@ -1,7 +1,13 @@
 import structlog
 
 from wire.compilers.sanitizer import HtmlSanitizer
-from wire.compilers.style_emission import collect_generated_styles, merge_class
+from wire.compilers.style_emission import (
+    collect_generated_styles,
+    count_inline_styles,
+    merge_class,
+    mint_dedup_classes,
+    sanitized_declarations,
+)
 from wire.schema.canonical import CanonicalDesignSchema, ComponentNode
 
 logger = structlog.get_logger(__name__)
@@ -31,6 +37,13 @@ class ReactAdapter:
         self._class_map, css = collect_generated_styles(
             cids.root, getattr(cids, "global_styles", [])
         )
+
+        # Repeated inline style objects are hoisted into shared classes (light
+        # DOM only; shadow content is rendered as a static string). The dedup
+        # rules go first so responsive @media rules still win their breakpoint.
+        freq = count_inline_styles(cids.root, include_shadow=False)
+        self._dedup_map, dedup_css = mint_dedup_classes(freq)
+        css = "\n".join(part for part in (dedup_css, css) if part)
 
         imports = "import React from 'react';\n\n"
         component = self._render_component(cids.root, "App", css)
@@ -135,8 +148,12 @@ class ReactAdapter:
             )
             return f'{prefix}<template shadowrootmode="open" dangerouslySetInnerHTML={{{{\n{prefix}  __html: `{escaped_html}`\n{prefix}}}}} />'
 
-        # Build props
+        # Build props. Combine the responsive/pseudo class with the dedup class
+        # (repeated inline styles hoisted to a shared class); a deduplicated node
+        # wears the class instead of an inline style object.
         gen_class = getattr(self, "_class_map", {}).get(id(node))
+        dedup_class = getattr(self, "_dedup_map", {}).get(sanitized_declarations(node))
+        combined_class = merge_class(gen_class, dedup_class)
         class_emitted = False
         props_parts = []
         for key, value in node.attributes.items():
@@ -149,13 +166,13 @@ class ReactAdapter:
                     continue
             jsx_key = self._html_attr_to_jsx(key)
             if key.lower() == "class":
-                value = merge_class(value, gen_class)
+                value = merge_class(value, combined_class)
                 class_emitted = True
             props_parts.append(f'{jsx_key}="{value}"')
-        if gen_class and not class_emitted:
-            props_parts.append(f'className="{gen_class}"')
+        if combined_class and not class_emitted:
+            props_parts.append(f'className="{combined_class}"')
 
-        if node.styles:
+        if node.styles and not dedup_class:
             style_parts = []
             for k, v in node.styles.items():
                 sanitized_val = HtmlSanitizer._sanitize_style_string(v)

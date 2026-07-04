@@ -499,4 +499,12 @@ class TestEndToEndRemovalOrchestration:
                 os.path.join(run_dir, "output_react.jsx"), "r", encoding="utf-8"
             ) as f:
                 react_code = f.read()
-            assert "dangerouslySetInnerHTML" not in react_code  # confirm sanitized
+            # Confirm sanitized: no script/handler injection, and the only
+            # permitted dangerouslySetInnerHTML is the sanitized CSS <style>
+            # element that carries the deduplicated/responsive stylesheet —
+            # never raw HTML or shadow markup.
+            assert "<script" not in react_code
+            assert "javascript:" not in react_code
+            assert react_code.count("dangerouslySetInnerHTML") == react_code.count(
+                "<style dangerouslySetInnerHTML"
+            )

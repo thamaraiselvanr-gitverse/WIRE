@@ -8,12 +8,79 @@ the HTML, React, and Vue outputs stay consistent.
 """
 
 import re
+from collections import Counter
 from typing import Dict, List, Optional, Tuple
 
 from wire.compilers.sanitizer import HtmlSanitizer
 from wire.schema.canonical import ComponentNode
 
 _URL_REF_RE = re.compile(r"url\(\s*(['\"]?)([^'\")]+?)\1\s*\)")
+
+# Inline style strings repeated at least this many times across the tree are
+# promoted to a shared CSS class instead of being duplicated on every element.
+DEDUP_MIN_OCCURRENCES = 2
+
+
+def sanitized_declarations(node: ComponentNode) -> str:
+    """The node's sanitized inline-style declaration string (e.g.
+    ``"color: red; padding: 8px"``), or ``""`` if it has none."""
+    parts = []
+    for k, v in (node.styles or {}).items():
+        sanitized_val = HtmlSanitizer._sanitize_style_string(v)
+        if sanitized_val:
+            parts.append(f"{k}: {sanitized_val}")
+    return "; ".join(parts)
+
+
+def count_inline_styles(
+    root: ComponentNode, include_shadow: bool = False
+) -> "Counter[str]":
+    """Count how often each inline-style string occurs across the tree.
+
+    Mirrors the compilers' skip rules so only styles that actually render are
+    eligible for class extraction. ``include_shadow`` follows shadow roots (the
+    HTML compiler deduplicates inside declarative shadow DOM; React/Vue render
+    shadow content as a static string and leave it inline, so they pass False).
+    """
+    counter: "Counter[str]" = Counter()
+
+    def walk(node: ComponentNode) -> None:
+        if node.tag in HtmlSanitizer.UNSAFE_TAGS and node.tag != "#shadow-root":
+            return
+        if node.tag not in ("#text", "#shadow-root"):
+            style = sanitized_declarations(node)
+            if style:
+                counter[style] += 1
+        if include_shadow and node.shadow_root:
+            walk(node.shadow_root)
+        for child in node.children:
+            walk(child)
+
+    walk(root)
+    return counter
+
+
+def mint_dedup_classes(
+    freq: "Counter[str]", min_occurrences: int = DEDUP_MIN_OCCURRENCES
+) -> Tuple[Dict[str, str], str]:
+    """Turn a style-frequency map into ``(declaration -> class name, css)``.
+
+    Strings occurring at least ``min_occurrences`` times become ``wire-cls-N``
+    rules, numbered deterministically by descending frequency then text so the
+    output is stable. The CSS is returned so callers can place it ahead of the
+    responsive/pseudo rules (letting ``@media`` win at equal specificity).
+    """
+    shared: Dict[str, str] = {}
+    for idx, (style, count) in enumerate(
+        sorted(freq.items(), key=lambda kv: (-kv[1], kv[0])), start=1
+    ):
+        if count >= min_occurrences:
+            shared[style] = f"wire-cls-{idx}"
+    css = "\n".join(
+        f".{cls} {{ {style} }}"
+        for style, cls in sorted(shared.items(), key=lambda kv: kv[1])
+    )
+    return shared, css
 
 
 def _localize_global_url_refs(rule: str) -> str:

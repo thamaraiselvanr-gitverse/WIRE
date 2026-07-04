@@ -1,16 +1,15 @@
-from collections import Counter
-
 import structlog
 
 from wire.compilers.sanitizer import HtmlSanitizer
-from wire.compilers.style_emission import render_css
+from wire.compilers.style_emission import (
+    count_inline_styles,
+    mint_dedup_classes,
+    render_css,
+    sanitized_declarations,
+)
 from wire.schema.canonical import CanonicalDesignSchema, ComponentNode
 
 logger = structlog.get_logger(__name__)
-
-# Inline style strings repeated at least this many times across the tree are
-# promoted to a shared CSS class instead of being duplicated on every element.
-_DEDUP_MIN_OCCURRENCES = 2
 
 
 class HTMLCompiler:
@@ -49,32 +48,6 @@ class HTMLCompiler:
             "</html>\n"
         )
 
-    @staticmethod
-    def _inline_style(node: ComponentNode) -> str:
-        """The node's sanitized inline-style declaration string (or "")."""
-        parts = []
-        for k, v in node.styles.items():
-            sanitized_val = HtmlSanitizer._sanitize_style_string(v)
-            if sanitized_val:
-                parts.append(f"{k}: {sanitized_val}")
-        return "; ".join(parts)
-
-    @classmethod
-    def _style_frequency(cls, node: ComponentNode, counter: "Counter[str]") -> None:
-        """Count how often each inline-style string occurs, mirroring the skip
-        rules of ``render_node`` so only styles that will actually render are
-        eligible for class extraction."""
-        if node.tag in HtmlSanitizer.UNSAFE_TAGS and node.tag != "#shadow-root":
-            return
-        if node.tag not in ("#text", "#shadow-root"):
-            style = cls._inline_style(node)
-            if style:
-                counter[style] += 1
-        if node.shadow_root:
-            cls._style_frequency(node.shadow_root, counter)
-        for child in node.children:
-            cls._style_frequency(child, counter)
-
     def _compile_parts(
         self,
         cids: CanonicalDesignSchema,
@@ -99,15 +72,8 @@ class HTMLCompiler:
         self._gen_class_counter = 0
 
         # ── Pass 1: find repeated inline-style strings and mint a class each ──
-        root_for_scan = cids.root
-        freq: Counter[str] = Counter()
-        self._style_frequency(root_for_scan, freq)
-        shared_styles: dict[str, str] = {}
-        for idx, (style, count) in enumerate(
-            sorted(freq.items(), key=lambda kv: (-kv[1], kv[0])), start=1
-        ):
-            if count >= _DEDUP_MIN_OCCURRENCES:
-                shared_styles[style] = f"wire-cls-{idx}"
+        freq = count_inline_styles(cids.root, include_shadow=True)
+        shared_styles, dedup_css = mint_dedup_classes(freq)
 
         def _sanitize_props(props: dict) -> dict:
             safe = {}
@@ -167,7 +133,7 @@ class HTMLCompiler:
             # Determine this node's inline style and whether it was deduplicated
             # into a shared class (Pass 1). Deduplicated nodes drop the inline
             # attribute and wear the class instead.
-            inline_style = self._inline_style(node)
+            inline_style = sanitized_declarations(node)
             dedup_class = shared_styles.get(inline_style)
 
             extra_classes = [c for c in (gen_class, dedup_class) if c]
@@ -222,13 +188,10 @@ class HTMLCompiler:
         else:
             body = render_node(cids.root)
 
-        # Deduplicated style classes first, so responsive @media rules (emitted
-        # later by render_css) override them at equal specificity within a
-        # breakpoint; :hover/:focus rules win via higher specificity regardless.
-        dedup_css = "\n".join(
-            f".{cls} {{ {style} }}"
-            for style, cls in sorted(shared_styles.items(), key=lambda kv: kv[1])
-        )
+        # Deduplicated style classes (from Pass 1) go first, so responsive
+        # @media rules (emitted later by render_css) override them at equal
+        # specificity within a breakpoint; :hover/:focus win by higher
+        # specificity regardless.
         base_css = render_css(
             getattr(cids, "global_styles", []), pseudo_rules, responsive_rules
         )
