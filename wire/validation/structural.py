@@ -1,3 +1,5 @@
+from typing import Any, Dict, List, Tuple
+
 import structlog
 from bs4 import BeautifulSoup
 
@@ -15,7 +17,7 @@ class StructuralValidator:
     drag the structural score — now a fidelity input — down artificially).
     """
 
-    def _build_tree(self, html: str) -> dict:
+    def _build_tree(self, html: str) -> Dict[str, Any]:
         """Build a simplified DOM tree representation."""
         soup = BeautifulSoup(html, "html.parser")
 
@@ -42,7 +44,7 @@ class StructuralValidator:
         return walk(soup)
 
     @staticmethod
-    def _signature(node: dict) -> tuple:
+    def _signature(node: Dict[str, Any]) -> Tuple[Any, ...]:
         """Identity signature used to align nodes across the two trees."""
         return (
             node["tag"],
@@ -51,7 +53,9 @@ class StructuralValidator:
         )
 
     @classmethod
-    def _align_children(cls, orig_children: list, recon_children: list) -> list:
+    def _align_children(
+        cls, orig_children: List[Any], recon_children: list
+    ) -> List[Any]:
         """
         Longest-common-subsequence alignment of two child lists keyed by
         signature. Returns a list of (orig_or_None, recon_or_None) pairs:
@@ -91,7 +95,7 @@ class StructuralValidator:
             j += 1
         return pairs
 
-    def compare(self, original_html: str, reconstructed_html: str) -> dict:
+    def compare(self, original_html: str, reconstructed_html: str) -> Dict[str, Any]:
         logger.info("comparing_dom_structure")
 
         orig_tree = self._build_tree(original_html)

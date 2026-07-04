@@ -1,3 +1,5 @@
+from typing import Any, Dict
+
 import structlog
 from playwright.async_api import Page
 
@@ -10,7 +12,7 @@ class NetworkMonitor:
     Monitors all network traffic during page load to identify API patterns.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.captured_requests: list[dict] = []
         self.api_endpoints: list[dict] = []
         self.dynamic_data: list[dict] = []
@@ -57,7 +59,7 @@ class NetworkMonitor:
                 }
             )
 
-    def get_report(self) -> dict:
+    def get_report(self) -> Dict[str, Any]:
         report = {
             "total_requests": len(self.captured_requests),
             "api_endpoints": self.api_endpoints,

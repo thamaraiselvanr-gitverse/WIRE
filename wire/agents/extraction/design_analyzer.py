@@ -1,6 +1,6 @@
 import re
 from collections import Counter
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Iterator, Optional, Tuple
 
 import structlog
 import tinycss2
@@ -44,11 +44,11 @@ class DesignAnalyzer:
             if style_tag.string:
                 css_content += "\n" + style_tag.string
 
-        fg_colors: Counter = Counter()
-        bg_colors: Counter = Counter()
-        font_families: Counter = Counter()
-        font_sizes: Counter = Counter()
-        spacing_values: Counter = Counter()
+        fg_colors: Counter[str] = Counter()
+        bg_colors: Counter[str] = Counter()
+        font_families: Counter[str] = Counter()
+        font_sizes: Counter[float] = Counter()
+        spacing_values: Counter[float] = Counter()
 
         for prop, val in self._iter_declarations(css_content):
             if prop in ("color", "border-color"):
@@ -80,7 +80,7 @@ class DesignAnalyzer:
         }
 
     # ── declaration iteration (top-level + inside @media) ──
-    def _iter_declarations(self, css_content: str):
+    def _iter_declarations(self, css_content: str) -> Iterator[Tuple[str, str]]:
         rules = tinycss2.parse_stylesheet(
             css_content, skip_comments=True, skip_whitespace=True
         )
@@ -101,7 +101,7 @@ class DesignAnalyzer:
                         yield from self._decls_of(r.content)
 
     @staticmethod
-    def _decls_of(content):
+    def _decls_of(content: Any) -> Iterator[Tuple[str, str]]:
         decls = tinycss2.parse_declaration_list(
             content, skip_comments=True, skip_whitespace=True
         )
@@ -162,7 +162,7 @@ class DesignAnalyzer:
 
     # ── token builders ──
     @staticmethod
-    def _build_colors(fg: Counter, bg: Counter) -> Dict[str, str]:
+    def _build_colors(fg: Counter[str], bg: Counter[str]) -> Dict[str, str]:
         result: Dict[str, str] = {}
         fg_ranked = [c for c, _ in fg.most_common()]
         bg_ranked = [c for c, _ in bg.most_common()]
@@ -187,7 +187,9 @@ class DesignAnalyzer:
         return result
 
     @staticmethod
-    def _build_typography(families: Counter, sizes: Counter) -> Dict[str, str]:
+    def _build_typography(
+        families: Counter[str], sizes: Counter[float]
+    ) -> Dict[str, str]:
         result: Dict[str, str] = {}
         fam_ranked = [f for f, _ in families.most_common()]
         if fam_ranked:
@@ -206,7 +208,7 @@ class DesignAnalyzer:
         return result
 
     @staticmethod
-    def _build_spacing(values: Counter) -> Dict[str, str]:
+    def _build_spacing(values: Counter[float]) -> Dict[str, str]:
         ordered = sorted(values.keys())
         result: Dict[str, str] = {}
         # Semantic names for the first few steps; consumers read sm/md/lg.

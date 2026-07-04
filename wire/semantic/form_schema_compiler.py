@@ -35,7 +35,7 @@ class FormSchemaCompiler:
     not as editable fields.
     """
 
-    def __init__(self, placeholder_detector: PlaceholderDetector):
+    def __init__(self, placeholder_detector: PlaceholderDetector) -> None:
         self.placeholder_detector = placeholder_detector
 
     def compile(

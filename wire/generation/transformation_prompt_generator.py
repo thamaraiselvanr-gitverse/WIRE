@@ -1,4 +1,4 @@
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 import structlog
 
@@ -20,7 +20,7 @@ class TransformationPromptGenerator:
         substitutions: List[ContentSubstitution],
         source_url: str,
         llm_guard: LLMGuard,
-        design_tokens: dict = None,
+        design_tokens: Optional[Dict[str, Any]] = None,
     ) -> TransformationPrompt:
         logger.info(
             "generating_transformation_prompt",

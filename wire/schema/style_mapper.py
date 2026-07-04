@@ -1,5 +1,5 @@
 import re
-from typing import Dict, Tuple
+from typing import Any, Dict, List, Tuple
 
 import structlog
 import tinycss2
@@ -9,7 +9,7 @@ logger = structlog.get_logger(__name__)
 
 
 class CascadeResolver:
-    def __init__(self):
+    def __init__(self) -> None:
         # Covers layout (box model, flex, grid), visual effects (shadow, filter,
         # opacity, transform/transition/animation), and typography/overflow
         # properties needed for accurate visual reconstruction. Custom properties
@@ -109,7 +109,9 @@ class CascadeResolver:
             "aspect-ratio",
         }
 
-    def _calculate_specificity(self, selector: str, source_order: int) -> tuple:
+    def _calculate_specificity(
+        self, selector: str, source_order: int
+    ) -> Tuple[Any, ...]:
         """
         Calculates CSS Specificity tuple: (inline, ids, classes, tags, source_order)
         """
@@ -125,7 +127,7 @@ class CascadeResolver:
 
         return (0, ids, classes, tags, source_order)
 
-    def _valid_decls_from_content(self, content) -> list:
+    def _valid_decls_from_content(self, content) -> List[Any]:
         """Parse a declaration-list token stream into allowed (prop, value) pairs."""
         decls = tinycss2.parse_declaration_list(
             content, skip_comments=True, skip_whitespace=True
@@ -158,7 +160,7 @@ class CascadeResolver:
         # id(element) -> { ":hover": { prop: value }, ":focus": {...}, ":active": {...} }
         self.pseudo_map: Dict[int, Dict[str, Dict[str, str]]] = {}
         # Document-level at-rules (@font-face, @keyframes) captured verbatim.
-        self.global_styles: list = []
+        self.global_styles: List[Any] = []
 
         # Collect internal style tags into global css execution run
         for style_tag in soup.find_all("style"):

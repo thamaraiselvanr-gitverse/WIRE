@@ -1,3 +1,5 @@
+from typing import Any, Dict, Optional
+
 import structlog
 from playwright.async_api import Browser
 
@@ -23,17 +25,17 @@ class RegionProbe:
         browser: Browser,
         url: str,
         asset_dir: str,
-        proxies: dict = None,
-    ) -> dict:
+        proxies: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
         logger.info(
             "starting_multi_region_capture", url=url, regions=list(self.REGIONS.keys())
         )
-        results = {}
+        results: Dict[str, Any] = {}
         proxies = proxies or {}
 
         for region_name, config in self.REGIONS.items():
             try:
-                context_args = {
+                context_args: Dict[str, Any] = {
                     "viewport": {"width": 1920, "height": 1080},
                     "timezone_id": config["timezone"],
                     "locale": config["locale"],

@@ -1,3 +1,5 @@
+from typing import Any, Dict, List, Optional
+
 import structlog
 
 from wire.compilers.sanitizer import HtmlSanitizer
@@ -13,7 +15,11 @@ logger = structlog.get_logger(__name__)
 
 
 class HTMLCompiler:
-    def compile(self, cids: CanonicalDesignSchema, injected_data: dict = None) -> str:
+    def compile(
+        self,
+        cids: CanonicalDesignSchema,
+        injected_data: Optional[Dict[str, Any]] = None,
+    ) -> str:
         """Compile the CIDS tree to an HTML body fragment prefixed with a
         <style> block for any non-inline (responsive/pseudo/global) rules."""
         body, css = self._compile_parts(cids, injected_data)
@@ -23,8 +29,8 @@ class HTMLCompiler:
     def compile_document(
         self,
         cids: CanonicalDesignSchema,
-        injected_data: dict = None,
-        title: str = None,
+        injected_data: Optional[Dict[str, Any]] = None,
+        title: Optional[str] = None,
     ) -> str:
         """Compile the CIDS tree to a complete, standalone HTML5 document with a
         proper <head> carrying the generated stylesheet (webfonts, animations,
@@ -51,7 +57,7 @@ class HTMLCompiler:
     def _compile_parts(
         self,
         cids: CanonicalDesignSchema,
-        injected_data: dict = None,
+        injected_data: Optional[Dict[str, Any]] = None,
         unwrap_root: bool = False,
     ) -> tuple[str, str]:
         """Render the body HTML and the generated CSS text (no <style> tag).
@@ -67,15 +73,15 @@ class HTMLCompiler:
         #   responsive_rules: media_query -> [(class_name, {prop: val})]
         #   pseudo_rules:     [(class_name, pseudo, {prop: val})]
         # A single generated class per node carries both.
-        responsive_rules: dict[str, list] = {}
-        pseudo_rules: list = []
+        responsive_rules: Dict[str, List[Any]] = {}
+        pseudo_rules: List[Any] = []
         self._gen_class_counter = 0
 
         # ── Pass 1: find repeated inline-style strings and mint a class each ──
         freq = count_inline_styles(cids.root, include_shadow=True)
         shared_styles, dedup_css = mint_dedup_classes(freq)
 
-        def _sanitize_props(props: dict) -> dict:
+        def _sanitize_props(props: Dict[str, Any]) -> Dict[str, Any]:
             safe = {}
             for k, v in props.items():
                 sanitized_val = HtmlSanitizer._sanitize_style_string(v)

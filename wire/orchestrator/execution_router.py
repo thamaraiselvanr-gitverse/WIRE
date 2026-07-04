@@ -84,7 +84,7 @@ logger = structlog.get_logger(__name__)
 
 
 class ExecutionRouter:
-    def __init__(self):
+    def __init__(self) -> None:
         # Phase 1 — Foundation
         self.crawler = Crawler()
         self.browser = BrowserSession()
@@ -243,7 +243,9 @@ class ExecutionRouter:
         logger.info("pipeline_completed_successfully", fidelity_score=score)
         return score
 
-    async def _process_page(self, page_url: str, state: dict) -> dict:
+    async def _process_page(
+        self, page_url: str, state: Dict[str, Any]
+    ) -> Dict[str, Any]:
         result: Dict[str, Any] = {
             "page": page_url,
             "assets": [],
@@ -446,7 +448,7 @@ class ExecutionRouter:
             if shadow_content:
                 try:
 
-                    def dict_to_node(d: dict) -> ComponentNode:
+                    def dict_to_node(d: Dict[str, Any]) -> ComponentNode:
                         if not d:
                             return None
                         children = [dict_to_node(c) for c in d.get("children", []) if c]

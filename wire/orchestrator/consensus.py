@@ -1,3 +1,5 @@
+from typing import Any, Dict
+
 import structlog
 
 logger = structlog.get_logger(__name__)
@@ -14,11 +16,11 @@ class ConsensusValidator:
     class remains a general-purpose agreement metric.
     """
 
-    def __init__(self, quorum_size: int = 3, threshold: float = 95.0):
+    def __init__(self, quorum_size: int = 3, threshold: float = 95.0) -> None:
         self.quorum_size = quorum_size
         self.threshold = threshold
 
-    async def validate(self, renders: list[bytes]) -> dict:
+    async def validate(self, renders: list[bytes]) -> Dict[str, Any]:
         """
         Compare multiple renders of the same page using pairwise pixel comparison.
         Returns consensus result with agreement score.

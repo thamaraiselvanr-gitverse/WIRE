@@ -5,7 +5,7 @@ from wire.utils.logging import setup_logging
 
 
 class WireService:
-    def __init__(self):
+    def __init__(self) -> None:
         setup_logging()
         self.logger = structlog.get_logger(__name__)
         self.router = ExecutionRouter()

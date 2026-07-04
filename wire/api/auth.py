@@ -1,6 +1,6 @@
 import os
 from datetime import datetime, timedelta
-from typing import Optional
+from typing import Any, Dict, Optional
 
 import bcrypt
 from fastapi import Depends, HTTPException, status
@@ -31,7 +31,9 @@ def get_password_hash(password: str) -> str:
     return bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
 
 
-def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
+def create_access_token(
+    data: Dict[str, Any], expires_delta: Optional[timedelta] = None
+):
     to_encode = data.copy()
     if expires_delta:
         expire = datetime.utcnow() + expires_delta

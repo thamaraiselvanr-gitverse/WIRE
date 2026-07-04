@@ -1,7 +1,7 @@
 import hashlib
 import os
 from io import BytesIO
-from typing import Optional
+from typing import Any, Dict, List, Optional
 
 import numpy as np
 import structlog
@@ -52,7 +52,7 @@ class VisualDiff:
 
     @staticmethod
     def volatility_mask(
-        image_paths: list, color_tolerance: int = 15
+        image_paths: List[Any], color_tolerance: int = 15
     ) -> Optional[np.ndarray]:
         """Detect dynamic (non-deterministic) regions across repeated renders of
         the same page.
@@ -83,7 +83,7 @@ class VisualDiff:
         reconstruction_path: str,
         color_tolerance: int = 15,
         ignore_mask: Optional[np.ndarray] = None,
-    ) -> dict:
+    ) -> Dict[str, Any]:
         """
         Compare two images pixel-by-pixel using decoded RGB values from Pillow.
 
@@ -166,7 +166,7 @@ class VisualDiff:
         reconstruction_path: str,
         color_tolerance: int = 15,
         ignore_mask: Optional[np.ndarray] = None,
-    ) -> dict:
+    ) -> Dict[str, Any]:
         """
         Compare two screenshot files and return a fidelity report.
         Uses compare_pixel_fidelity for the final similarity percentage.
@@ -222,7 +222,7 @@ class VisualDiff:
         reconstruction_path: str,
         color_tolerance: int = 15,
         ignore_mask: Optional[np.ndarray] = None,
-    ) -> dict:
+    ) -> Dict[str, Any]:
         """
         Like compare_screenshots, but tolerant of dimension mismatches.
 

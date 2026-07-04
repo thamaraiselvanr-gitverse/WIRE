@@ -29,7 +29,9 @@ class InputBlueprint(BaseModel):
                 raise ValueError(f"Slot ID mismatch: {slot.id} != {slot_id}")
         return v
 
-    def validate_input(self, slot_id: str, value: Any, strict: bool = True) -> dict:
+    def validate_input(
+        self, slot_id: str, value: Any, strict: bool = True
+    ) -> Dict[str, Any]:
         """
         Validates a user-provided value against slot constraints.
         Returns:
@@ -144,7 +146,7 @@ class InputBlueprint(BaseModel):
 
     def generate_summary_report(
         self, inputs: Dict[str, Any], strict: bool = True
-    ) -> dict:
+    ) -> Dict[str, Any]:
         """
         Validates all inputs and aggregates them into a structured report.
         """

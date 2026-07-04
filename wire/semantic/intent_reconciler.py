@@ -75,7 +75,7 @@ class IntentReconciler:
     without a real slot_id.
     """
 
-    def __init__(self, llm_guard: LLMGuard):
+    def __init__(self, llm_guard: LLMGuard) -> None:
         self.llm_guard = llm_guard
 
     def reconcile(

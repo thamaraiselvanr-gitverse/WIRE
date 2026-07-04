@@ -1,6 +1,7 @@
 import os
 import re
 import urllib.parse
+from typing import Optional
 
 import httpx
 import structlog
@@ -12,7 +13,7 @@ URL_REGEX = re.compile(r"url\(\s*['\"]?(.*?)['\"]?\s*\)")
 
 
 class AssetDownloader:
-    def __init__(self):
+    def __init__(self) -> None:
         self.client = httpx.AsyncClient()
 
     async def download_assets(
@@ -22,7 +23,7 @@ class AssetDownloader:
         downloaded_assets = []
 
         async def fetch_and_save(
-            orig_url: str, asset_type: str, source_url: str = None
+            orig_url: str, asset_type: str, source_url: Optional[str] = None
         ) -> str:
             if orig_url.startswith("data:"):
                 return orig_url

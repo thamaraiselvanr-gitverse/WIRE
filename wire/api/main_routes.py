@@ -1,4 +1,5 @@
 import asyncio
+from typing import Any, AsyncGenerator, Dict, List
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
@@ -20,7 +21,7 @@ class ReconstructionRequest(BaseModel):
 class BrandRequest(BaseModel):
     # Map of design-token color roles -> color values, e.g.
     # {"primary": "#0055ff", "background": "#ffffff"}.
-    colors: dict
+    colors: Dict[str, Any]
 
 
 class SubstituteRequest(BaseModel):
@@ -28,11 +29,11 @@ class SubstituteRequest(BaseModel):
     # {"headline": {"type": "text", "value": "Hi"},
     #  "hero_img": {"type": "image", "value": "<b64>",
     #               "original_filename": "a.png", "content_type": "image/png"}}
-    field_values: dict
+    field_values: Dict[str, Any]
 
 
 # In-memory queue for streaming log events to clients
-log_event_queues = []
+log_event_queues: List["asyncio.Queue[Any]"] = []
 
 
 def _run_id_for_url(url: str) -> str:
@@ -56,7 +57,7 @@ async def start_reconstruction(
     req: ReconstructionRequest,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
-):
+) -> Dict[str, Any]:
     # Create project record
     project = Project(url=req.url, owner_id=current_user.id, status="running")
     db.add(project)
@@ -65,12 +66,12 @@ async def start_reconstruction(
 
     # In a real background setup we'd dispatch to Celery/Redis queue.
     # For now we'll simulate a start.
-    asyncio.create_task(run_background_pipeline(project.id, req.url))
+    asyncio.create_task(run_background_pipeline(int(project.id), req.url))
 
     return {"message": "Reconstruction started", "project_id": project.id}
 
 
-async def run_background_pipeline(project_id: int, url: str):
+async def run_background_pipeline(project_id: int, url: str) -> None:
     # This acts as the bridge layer calling the wire.orchestrator
     try:
         from wire.api.database import AsyncSessionLocal
@@ -95,10 +96,13 @@ async def run_background_pipeline(project_id: int, url: str):
                 await db.commit()
 
 
-@router.get("")
+# response_model=None: return SQLAlchemy ORM rows directly via jsonable_encoder;
+# the -> Any hint must not be treated by FastAPI as a serialization model.
+@router.get("", response_model=None)
 async def list_projects(
-    db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)
-):
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> Any:
     result = await db.execute(
         select(Project)
         .where(Project.owner_id == current_user.id)
@@ -113,7 +117,7 @@ async def apply_brand(
     req: BrandRequest,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
-):
+) -> Any:
     """Apply a brand palette onto a completed reconstruction and recompile.
 
     Restyles the stored CIDS layout with the supplied colors (preserving
@@ -133,7 +137,7 @@ async def apply_brand(
 
     from wire.orchestrator.execution_router import ExecutionRouter
 
-    run_id = _run_id_for_url(project.url)
+    run_id = _run_id_for_url(str(project.url))
     router_engine = ExecutionRouter()
     try:
         summary = router_engine.apply_brand(run_id, {"colors": req.colors})
@@ -148,7 +152,7 @@ async def substitute_content(
     req: SubstituteRequest,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
-):
+) -> Dict[str, Any]:
     """Submit user content (text/image/video/audio/document) for a run.
 
     Validates the submission against the run's form schema, ingests uploaded
@@ -171,7 +175,7 @@ async def substitute_content(
     from wire.orchestrator.execution_router import ExecutionRouter
     from wire.schema.submission_schema import SubmissionPayload
 
-    run_id = _run_id_for_url(project.url)
+    run_id = _run_id_for_url(str(project.url))
     try:
         payload = SubmissionPayload(run_id=run_id, field_values=req.field_values)
     except ValidationError as e:
@@ -187,7 +191,7 @@ async def substitute_content(
     return submission_result.model_dump()
 
 
-async def get_current_user_file(request: Request, db: AsyncSession):
+async def get_current_user_file(request: Request, db: AsyncSession) -> Any:
     from jose import JWTError, jwt
 
     from wire.api.auth import ALGORITHM, SECRET_KEY
@@ -224,7 +228,7 @@ async def get_current_user_file(request: Request, db: AsyncSession):
 @router.get("/{project_id}/files/{filename:path}")
 async def get_project_file(
     project_id: int, filename: str, request: Request, db: AsyncSession = Depends(get_db)
-):
+) -> Any:
     import os
 
     from fastapi.responses import FileResponse
@@ -246,7 +250,7 @@ async def get_project_file(
 
     # 2. Resolve the run directory using the same naming as LocalStorage
     #    (strips "www.", maps ":" to "_") so www.* sites are found correctly.
-    host = _run_id_for_url(project.url)
+    host = _run_id_for_url(str(project.url))
 
     # 3. Resolve path cleanly to prevent directory traversal
     if "assets/" in filename or "assets\\" in filename:
@@ -263,12 +267,12 @@ async def get_project_file(
 
 
 @router.get("/telemetry")
-async def stream_telemetry(request: Request):
+async def stream_telemetry(request: Request) -> Any:
     """Server-Sent Events (SSE) telemetry feed for the frontend"""
-    queue = asyncio.Queue()
+    queue: "asyncio.Queue[Any]" = asyncio.Queue()
     log_event_queues.append(queue)
 
-    async def event_generator():
+    async def event_generator() -> AsyncGenerator[Dict[str, Any], None]:
         try:
             while True:
                 if await request.is_disconnected():

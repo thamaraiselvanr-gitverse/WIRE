@@ -1,4 +1,5 @@
 import os
+from typing import Any, Dict
 
 import structlog
 from playwright.async_api import Page
@@ -17,7 +18,7 @@ class ViewportRenderer:
 
     async def capture_viewports(
         self, page: Page, storage: LocalStorage, url: str
-    ) -> dict:
+    ) -> Dict[str, Any]:
         logger.info("capturing_viewports", url=url)
         results = {}
         for name, dims in self.VIEWPORTS.items():

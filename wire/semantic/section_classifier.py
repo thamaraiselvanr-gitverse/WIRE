@@ -139,7 +139,7 @@ class SectionClassifier:
     Sections below 0.80 confidence → UNKNOWN, never forced into a category.
     """
 
-    def __init__(self, llm_guard: LLMGuard):
+    def __init__(self, llm_guard: LLMGuard) -> None:
         self.llm_guard = llm_guard
 
     def classify_tree(self, root: ComponentNode) -> List[ClassifiedSection]:

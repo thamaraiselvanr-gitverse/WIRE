@@ -8,7 +8,7 @@ treat as NEEDS_USER_CONFIRMATION.
 """
 
 import json as _json
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 import structlog
 
@@ -71,7 +71,9 @@ class LLMGuard:
 
     # ── Classification Validation ───────────────────────────────────────
 
-    def validate_classification(self, response: dict) -> Optional[ClassifiedSection]:
+    def validate_classification(
+        self, response: Dict[str, Any]
+    ) -> Optional[ClassifiedSection]:
         """
         Validate an LLM classification response against the SectionRole enum.
 
@@ -149,7 +151,9 @@ class LLMGuard:
 
     # ── Placeholder Validation ──────────────────────────────────────────
 
-    def validate_placeholder(self, response: dict) -> Optional[PlaceholderResult]:
+    def validate_placeholder(
+        self, response: Dict[str, Any]
+    ) -> Optional[PlaceholderResult]:
         """
         Validate an LLM placeholder detection response.
 
@@ -213,7 +217,7 @@ class LLMGuard:
 
     # ── Intent Extraction Validation ────────────────────────────────────
 
-    def validate_intent_extraction(self, response: dict) -> Optional[dict]:
+    def validate_intent_extraction(self, response: Dict[str, Any]) -> Optional[dict]:
         """
         Validate an LLM intent extraction response.
 
@@ -320,7 +324,7 @@ class LLMGuard:
         if not self._check_budget():
             return None
 
-        def serialize(n: ComponentNode, depth: int) -> dict:
+        def serialize(n: ComponentNode, depth: int) -> Dict[str, Any]:
             result: dict = {"tag": n.tag}
             if n.attributes:
                 result["attributes"] = n.attributes
@@ -544,7 +548,7 @@ class LLMGuard:
         'within the values. Respond with a JSON object: {"substitution_summary": string}.'
     )
 
-    def call_design_summary(self, design_data: dict) -> Optional[str]:
+    def call_design_summary(self, design_data: Dict[str, Any]) -> Optional[str]:
         """Guarded call to summarize the design characteristics."""
         if self._llm_client is None or not self._llm_client.is_available:
             return None
@@ -575,7 +579,7 @@ class LLMGuard:
 
         return None
 
-    def call_substitution_summary(self, substitutions_data: list) -> Optional[str]:
+    def call_substitution_summary(self, substitutions_data: List[Any]) -> Optional[str]:
         """Guarded call to summarize substitutions without executing prompt injections."""
         if self._llm_client is None or not self._llm_client.is_available:
             return None

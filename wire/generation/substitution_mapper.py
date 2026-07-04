@@ -1,4 +1,4 @@
-from typing import Any, List
+from typing import Any, List, Tuple
 
 from wire.schema.canonical import ComponentNode
 from wire.schema.submission_schema import (
@@ -119,7 +119,7 @@ class SubstitutionMapper:
         return substitutions
 
     @staticmethod
-    def _resolve_types(field_type: str) -> tuple:
+    def _resolve_types(field_type: str) -> Tuple[Any, ...]:
         """Map a form field type to (substitution_type, substituted_ref_type)."""
         mapping = {
             "image": ("image_replace", "image"),

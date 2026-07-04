@@ -10,7 +10,7 @@ logger = structlog.get_logger(__name__)
 
 
 class LocalStorage(StorageBackend):
-    def __init__(self):
+    def __init__(self) -> None:
         self.config = get_config()
         self.base_dir = self.config.output_dir
         self.current_run_dir = ""

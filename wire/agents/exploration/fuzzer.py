@@ -1,3 +1,5 @@
+from typing import Any, Dict
+
 import structlog
 from playwright.async_api import Page
 
@@ -31,7 +33,7 @@ class InteractionFuzzer:
         "[class*='hover']",
     ]
 
-    async def discover_elements(self, page: Page) -> dict:
+    async def discover_elements(self, page: Page) -> Dict[str, Any]:
         logger.info("fuzzing_interactive_elements")
         results = {
             "clickable": [],

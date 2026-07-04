@@ -16,7 +16,7 @@ class TemplateVersioning:
     snapshot. Each version record wraps its payload under ``data``.
     """
 
-    def __init__(self, base_dir: str = "templates"):
+    def __init__(self, base_dir: str = "templates") -> None:
         self.base_dir = base_dir
         os.makedirs(self.base_dir, exist_ok=True)
         self.store_path = os.path.join(self.base_dir, "versions.json")
@@ -35,7 +35,7 @@ class TemplateVersioning:
         with open(self.store_path, "w", encoding="utf-8") as f:
             json.dump(self.store, f, indent=2, default=str)
 
-    def save_version(self, template_id: str, data: dict) -> int:
+    def save_version(self, template_id: str, data: Dict[str, Any]) -> int:
         versions = self.store.setdefault(template_id, [])
         version_number = len(versions) + 1
         versions.append(
@@ -87,7 +87,7 @@ class TemplateVersioning:
         }
 
     @staticmethod
-    def _root_of(data: dict) -> dict:
+    def _root_of(data: Dict[str, Any]) -> Dict[str, Any]:
         # Accept either a full schema ({"root": {...}}) or a bare node.
         if isinstance(data, dict) and "root" in data:
             return data["root"]

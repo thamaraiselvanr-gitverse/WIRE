@@ -8,7 +8,7 @@ class Coordinator:
     Redis-compatible coordination layer. Local in-memory lock manager for single node.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.locks = set()
 
     def acquire_lock(self, resource_id: str) -> bool:

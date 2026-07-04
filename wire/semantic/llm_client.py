@@ -31,7 +31,7 @@ class LLMClient:
     set, all calls return None (graceful degradation, not a crash).
     """
 
-    def __init__(self, model_name: Optional[str] = None):
+    def __init__(self, model_name: Optional[str] = None) -> None:
         self._model_name = model_name or os.environ.get(
             "WIRE_LLM_MODEL", _DEFAULT_MODEL
         )

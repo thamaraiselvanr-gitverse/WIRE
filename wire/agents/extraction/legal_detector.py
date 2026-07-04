@@ -1,4 +1,5 @@
 import urllib.parse
+from typing import Any, Dict
 
 import httpx
 import structlog
@@ -12,7 +13,7 @@ class LegalDetector:
     a compliance classification for the target URL.
     """
 
-    async def analyze(self, url: str) -> dict:
+    async def analyze(self, url: str) -> Dict[str, Any]:
         logger.info("analyzing_legal_compliance", url=url)
         parsed = urllib.parse.urlparse(url)
         base_url = f"{parsed.scheme}://{parsed.netloc}"

@@ -1,4 +1,5 @@
 import re
+from typing import Any, Dict
 
 import structlog
 from playwright.async_api import Page
@@ -154,7 +155,7 @@ class ComprehensiveExtractor:
     accessibility inventory, and a component inventory.
     """
 
-    async def extract(self, page: Page) -> dict:
+    async def extract(self, page: Page) -> Dict[str, Any]:
         logger.info("comprehensive_extraction_started")
         try:
             report = await page.evaluate(_EXTRACT_JS)

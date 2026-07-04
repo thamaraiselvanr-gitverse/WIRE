@@ -1,6 +1,6 @@
 import json
 import os
-from typing import Any
+from typing import Any, Dict, Optional
 
 import structlog
 
@@ -14,7 +14,7 @@ class KnowledgeIndex:
     Uses a simple JSON-backed index for Phase 4; ready for vector DB upgrade.
     """
 
-    def __init__(self, index_dir: str = "output"):
+    def __init__(self, index_dir: str = "output") -> None:
         self.index_dir = index_dir
         self.index_file = os.path.join(index_dir, "knowledge_index.json")
         self.entries: list[dict[str, Any]] = []
@@ -42,7 +42,7 @@ class KnowledgeIndex:
         self._save()
         logger.info("knowledge_entry_added", category=category, key=key)
 
-    def index_design(self, url: str, design_data: dict) -> None:
+    def index_design(self, url: str, design_data: Dict[str, Any]) -> None:
         """Index all design tokens from a reconstructed site."""
         logger.info("indexing_design_knowledge", url=url)
 
@@ -55,10 +55,10 @@ class KnowledgeIndex:
 
     def query(
         self,
-        category: str = None,
-        key: str = None,
-        token_match: str = None,
-        color_similarity_target: str = None,
+        category: Optional[str] = None,
+        key: Optional[str] = None,
+        token_match: Optional[str] = None,
+        color_similarity_target: Optional[str] = None,
         color_similarity_threshold: float = 30.0,
     ) -> list[dict]:
         """Query the knowledge index by category, key, token match, or color similarity."""

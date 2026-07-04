@@ -44,7 +44,8 @@ class CanonicalDesignSchema(BaseModel):
     global_styles: List[str] = Field(default_factory=list)
 
 
-from bs4 import BeautifulSoup, Comment, NavigableString
+from bs4 import BeautifulSoup
+from bs4.element import Comment, NavigableString
 
 from wire.compilers.sanitizer import HtmlSanitizer
 
@@ -64,13 +65,13 @@ class HTMLToCidsParser:
     }
 
     @staticmethod
-    def _resolve_vars(val: str, scope: dict) -> str:
+    def _resolve_vars(val: str, scope: Dict[str, str]) -> str:
         if "var(" not in val:
             return val
 
         import re
 
-        def replace_var(match):
+        def replace_var(match: "re.Match[str]") -> str:
             inner = match.group(1).split(",")
             var_name = inner[0].strip()
             fallback = inner[1].strip() if len(inner) > 1 else ""
@@ -85,12 +86,12 @@ class HTMLToCidsParser:
 
     @staticmethod
     def parse(
-        soup_or_html,
-        style_map: dict = None,
-        interactions_map: dict = None,
-        shadow_roots_map: dict = None,
-        responsive_map: dict = None,
-        pseudo_map: dict = None,
+        soup_or_html: Any,
+        style_map: Optional[Dict[Any, Any]] = None,
+        interactions_map: Optional[Dict[Any, Any]] = None,
+        shadow_roots_map: Optional[Dict[Any, Any]] = None,
+        responsive_map: Optional[Dict[Any, Any]] = None,
+        pseudo_map: Optional[Dict[Any, Any]] = None,
     ) -> ComponentNode:
         if isinstance(soup_or_html, str):
             soup = BeautifulSoup(soup_or_html, "lxml")
@@ -119,13 +120,13 @@ class HTMLToCidsParser:
 
     @staticmethod
     def _process_node(
-        node,
-        style_map: dict,
-        inherited_styles: dict = None,
-        interactions_map: dict = None,
-        shadow_roots_map: dict = None,
-        responsive_map: dict = None,
-        pseudo_map: dict = None,
+        node: Any,
+        style_map: Dict[Any, Any],
+        inherited_styles: Optional[Dict[Any, Any]] = None,
+        interactions_map: Optional[Dict[Any, Any]] = None,
+        shadow_roots_map: Optional[Dict[Any, Any]] = None,
+        responsive_map: Optional[Dict[Any, Any]] = None,
+        pseudo_map: Optional[Dict[Any, Any]] = None,
     ) -> Optional[ComponentNode]:
         if isinstance(node, Comment):
             return None
@@ -151,7 +152,7 @@ class HTMLToCidsParser:
         ]:
             return None
 
-        attributes = {}
+        attributes: Dict[str, str] = {}
         if hasattr(node, "attrs"):
             for k, v in node.attrs.items():
                 # Strip inline event handlers
@@ -222,12 +223,12 @@ class HTMLToCidsParser:
         shadow_roots_map = shadow_roots_map or {}
 
         # Helper to generate unique path matching Playwright
-        def get_path(n):
+        def get_path(n: Any) -> str:
             if not n:
                 return ""
             if n.get("id"):
                 return f"#{n.get('id')}"
-            path = []
+            path: List[str] = []
             curr = n
             while curr and curr.name != "[document]":
                 if curr.name == "html":

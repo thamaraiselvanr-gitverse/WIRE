@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import Any, Dict, Optional
 
 import structlog
 
@@ -11,23 +11,27 @@ class FidelityScorer:
     CRITICAL_VISUAL_THRESHOLD = 40.0
     CRITICAL_STRUCTURAL_THRESHOLD = 40.0
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.critical_errors = 0
         self.non_critical_errors = 0
         self.base_score = 100.0
         self.visual_similarity: Optional[float] = None
         self.structural_similarity: Optional[float] = None
 
-    def log_critical_error(self, message: str, context: dict = None):
+    def log_critical_error(
+        self, message: str, context: Optional[Dict[str, Any]] = None
+    ) -> None:
         self.critical_errors += 1
         logger.error(f"critical_fidelity_error: {message}", context=context)
 
-    def log_non_critical_error(self, message: str, context: dict = None):
+    def log_non_critical_error(
+        self, message: str, context: Optional[Dict[str, Any]] = None
+    ) -> None:
         self.non_critical_errors += 1
         logger.warning(f"non_critical_fidelity_error: {message}", context=context)
 
     def record_visual_similarity(
-        self, similarity_percent: float, context: dict = None
+        self, similarity_percent: float, context: Optional[Dict[str, Any]] = None
     ) -> None:
         """Feed a real pixel/perceptual similarity score into the fidelity calc."""
         self.visual_similarity = similarity_percent
@@ -41,7 +45,9 @@ class FidelityScorer:
                 context,
             )
 
-    def record_structural_similarity(self, score: float, context: dict = None) -> None:
+    def record_structural_similarity(
+        self, score: float, context: Optional[Dict[str, Any]] = None
+    ) -> None:
         """Feed a real DOM-structure comparison score into the fidelity calc."""
         self.structural_similarity = score
         logger.info("structural_similarity_recorded", score=score, context=context)

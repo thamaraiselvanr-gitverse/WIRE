@@ -1,7 +1,7 @@
 import base64
 import os
 import uuid
-from typing import Any, Dict
+from typing import Any, Dict, Tuple
 
 import structlog
 
@@ -38,7 +38,7 @@ class MediaIngestionPipeline:
     @staticmethod
     def decode_and_verify(
         b64_string: str, kind: str, max_size_bytes: int = DEFAULT_MAX_BYTES
-    ) -> tuple:
+    ) -> Tuple[Any, ...]:
         """Decode base64, enforce size, verify magic bytes. Returns (bytes, ext)."""
         if "," in b64_string and b64_string.strip().startswith("data:"):
             b64_string = b64_string.split(",", 1)[1]

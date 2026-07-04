@@ -11,7 +11,7 @@ logger = structlog.get_logger(__name__)
 
 
 class BrowserSession:
-    def __init__(self, credentials: Optional[dict] = None):
+    def __init__(self, credentials: Optional[dict] = None) -> None:
         self.config = get_config()
         self.playwright = None
         self.browser: Browser = None

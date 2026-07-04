@@ -9,7 +9,7 @@ the HTML, React, and Vue outputs stay consistent.
 
 import re
 from collections import Counter
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from wire.compilers.sanitizer import HtmlSanitizer
 from wire.schema.canonical import ComponentNode
@@ -107,7 +107,7 @@ def _localize_global_url_refs(rule: str) -> str:
     return _URL_REF_RE.sub(repl, rule)
 
 
-def _sanitize_props(props: dict) -> dict:
+def _sanitize_props(props: Dict[str, Any]) -> Dict[str, Any]:
     safe = {}
     for k, v in (props or {}).items():
         sanitized = HtmlSanitizer._sanitize_style_string(v)
@@ -140,7 +140,7 @@ def collect_generated_styles(
     """
     class_map: Dict[int, str] = {}
     responsive_rules: Dict[str, list] = {}
-    pseudo_rules: list = []
+    pseudo_rules: List[Any] = []
     counter = [0]
 
     def walk(node: ComponentNode) -> None:
@@ -176,8 +176,8 @@ def collect_generated_styles(
 
 def render_css(
     global_styles: Optional[List[str]],
-    pseudo_rules: list,
-    responsive_rules: dict,
+    pseudo_rules: List[Any],
+    responsive_rules: Dict[str, Any],
 ) -> str:
     """Render the final stylesheet text (without the enclosing <style> tag)."""
     blocks: List[str] = []

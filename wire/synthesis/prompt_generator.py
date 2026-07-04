@@ -1,4 +1,5 @@
 import json
+from typing import Any, Dict
 
 import structlog
 
@@ -11,7 +12,7 @@ class PromptGenerator:
     Produces LLM-friendly descriptions for design regeneration or variation.
     """
 
-    def generate_prompts(self, design_data: dict, url: str) -> list[dict]:
+    def generate_prompts(self, design_data: Dict[str, Any], url: str) -> list[dict]:
         logger.info("generating_ai_design_prompts", url=url)
 
         prompts = []
@@ -55,7 +56,7 @@ class PromptGenerator:
         logger.info("prompts_generated", count=len(prompts))
         return prompts
 
-    def _build_layout_prompt(self, data: dict, url: str) -> str:
+    def _build_layout_prompt(self, data: Dict[str, Any], url: str) -> str:
         colors = data.get("colors", {})
         spacing = data.get("spacing", {})
         return (
@@ -69,7 +70,7 @@ class PromptGenerator:
             f"- Ensure layout is responsive (mobile-first, 768px and 1200px breakpoints)."
         )
 
-    def _build_color_prompt(self, data: dict) -> str:
+    def _build_color_prompt(self, data: Dict[str, Any]) -> str:
         colors = data.get("colors", {})
         color_list = ", ".join([f"{k}: {v}" for k, v in colors.items()])
         return (
@@ -78,7 +79,7 @@ class PromptGenerator:
             f"(success, warning, error, info) that harmonize with this palette."
         )
 
-    def _build_typography_prompt(self, data: dict) -> str:
+    def _build_typography_prompt(self, data: Dict[str, Any]) -> str:
         typo = data.get("typography", {})
         return (
             f"Create a typography scale using base font '{typo.get('base', 'sans-serif')}' "
@@ -87,7 +88,7 @@ class PromptGenerator:
             f"Include line-height and letter-spacing recommendations."
         )
 
-    def _build_full_prompt(self, data: dict, url: str) -> str:
+    def _build_full_prompt(self, data: Dict[str, Any], url: str) -> str:
         colors = data.get("colors", {})
         spacing = data.get("spacing", {})
         typography = data.get("typography", {})

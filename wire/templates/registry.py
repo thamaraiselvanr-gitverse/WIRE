@@ -16,7 +16,7 @@ class TemplateRegistry:
     layered on top without changing this contract.
     """
 
-    def __init__(self, base_dir: str = "templates"):
+    def __init__(self, base_dir: str = "templates") -> None:
         self.base_dir = base_dir
         os.makedirs(self.base_dir, exist_ok=True)
         self.index_path = os.path.join(self.base_dir, "registry.json")

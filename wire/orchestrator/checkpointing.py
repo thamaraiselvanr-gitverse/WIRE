@@ -1,6 +1,7 @@
 import json
 import os
 import time
+from typing import Any, Dict
 
 import structlog
 
@@ -14,12 +15,12 @@ class CheckpointManager:
     can be resumed without data loss.
     """
 
-    def __init__(self, checkpoint_dir: str):
+    def __init__(self, checkpoint_dir: str) -> None:
         self.checkpoint_dir = checkpoint_dir
         self.checkpoint_file = os.path.join(checkpoint_dir, "checkpoint.json")
         os.makedirs(checkpoint_dir, exist_ok=True)
 
-    def save(self, state: dict) -> None:
+    def save(self, state: Dict[str, Any]) -> None:
         state["_timestamp"] = time.time()
         state["_version"] = 1
         with open(self.checkpoint_file, "w", encoding="utf-8") as f:
@@ -38,7 +39,7 @@ class CheckpointManager:
         )
         return state
 
-    def mark_page_done(self, state: dict, url: str) -> dict:
+    def mark_page_done(self, state: Dict[str, Any], url: str) -> Dict[str, Any]:
         if "completed_pages" not in state:
             state["completed_pages"] = []
         if url not in state["completed_pages"]:
@@ -46,7 +47,7 @@ class CheckpointManager:
         self.save(state)
         return state
 
-    def is_page_done(self, state: dict, url: str) -> bool:
+    def is_page_done(self, state: Dict[str, Any], url: str) -> bool:
         return url in state.get("completed_pages", [])
 
     def clear(self) -> None:
