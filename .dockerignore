@@ -1,0 +1,28 @@
+# Python
+.venv/
+**/__pycache__/
+*.pyc
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+htmlcov/
+.coverage
+*.egg-info/
+
+# Local data / build artifacts
+output/
+templates/
+*.db
+*.wire
+
+# Frontend build inputs (the API image doesn't need them)
+frontend/node_modules/
+frontend/dist/
+
+# Dev / VCS
+.git/
+.github/
+tests/
+.env
+.env.*
+!.env.example

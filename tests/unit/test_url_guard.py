@@ -63,3 +63,19 @@ def test_real_resolve_localhost_and_invalid():
     # Real getaddrinfo: localhost resolves; a bogus TLD does not.
     assert ug._resolve("localhost")  # non-empty (loopback addrs)
     assert ug._resolve("host.invalid.nonexistent.tld.example") == []
+
+
+def test_subresource_guard_blocks_literal_internal_only():
+    from wire.utils.url_guard import is_disallowed_subresource as blocked
+
+    # Blocked: literal internal IPs, metadata, local names.
+    assert blocked("http://169.254.169.254/latest/meta-data/") is True
+    assert blocked("http://127.0.0.1/x.png") is True
+    assert blocked("http://10.0.0.1/a.css") is True
+    assert blocked("http://localhost/logo.svg") is True
+    assert blocked("https://api.internal/font.woff2") is True
+    # Not blocked here (no per-asset DNS): public IPs and plain hostnames.
+    assert blocked("https://93.184.216.34/img.png") is False
+    assert blocked("https://cdn.example.com/app.js") is False
+    # data:/relative are not this function's concern.
+    assert blocked("data:image/png;base64,AAAA") is False

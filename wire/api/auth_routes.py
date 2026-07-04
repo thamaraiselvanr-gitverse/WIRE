@@ -1,7 +1,7 @@
 from datetime import timedelta
 from typing import Any, Dict
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordRequestForm
 from pydantic import BaseModel, EmailStr
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -15,6 +15,12 @@ from .auth import (
 )
 from .database import get_db
 from .models import User
+from .rate_limit import auth_limiter
+
+
+def _client_key(request: Request) -> str:
+    return f"ip:{request.client.host if request.client else 'unknown'}"
+
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
@@ -32,8 +38,9 @@ class Token(BaseModel):
 
 @router.post("/register", response_model=Token)
 async def register(
-    user: UserCreate, db: AsyncSession = Depends(get_db)
+    user: UserCreate, request: Request, db: AsyncSession = Depends(get_db)
 ) -> Dict[str, Any]:
+    auth_limiter.check(_client_key(request))
     result = await db.execute(
         select(User).where(
             (User.username == user.username) | (User.email == user.email)
@@ -62,9 +69,11 @@ async def register(
 
 @router.post("/login", response_model=Token)
 async def login(
+    request: Request,
     form_data: OAuth2PasswordRequestForm = Depends(),
     db: AsyncSession = Depends(get_db),
 ) -> Dict[str, Any]:
+    auth_limiter.check(_client_key(request))
     result = await db.execute(select(User).where(User.username == form_data.username))
     user = result.scalars().first()
     if not user or not verify_password(form_data.password, str(user.hashed_password)):

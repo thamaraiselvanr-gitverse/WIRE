@@ -58,6 +58,11 @@ async def start_reconstruction(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> Dict[str, Any]:
+    # Rate limit the expensive reconstruction endpoint per user.
+    from wire.api.rate_limit import reconstruction_limiter
+
+    reconstruction_limiter.check(f"user:{current_user.id}")
+
     # SSRF guard at the trust boundary: reject internal/private/loopback targets
     # before the engine ever fetches or navigates to the URL.
     from wire.utils.url_guard import is_public_http_url

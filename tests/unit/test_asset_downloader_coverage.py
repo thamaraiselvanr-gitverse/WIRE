@@ -59,3 +59,28 @@ async def test_asset_downloader_branches(tmp_path):
     assert "missing.js" in rewritten
     # Inline <style> url() was rewritten into assets/.
     assert "assets/" in rewritten
+
+
+@pytest.mark.asyncio
+async def test_asset_downloader_blocks_internal_ssrf(tmp_path):
+    # A page referencing internal targets must not cause the server to fetch
+    # them; the references are left untouched (not localized).
+    html = (
+        '<html><head><link rel="stylesheet" '
+        'href="http://169.254.169.254/x.css"></head>'
+        '<body><img src="http://127.0.0.1/secret.png"></body></html>'
+    )
+    assets = str(tmp_path / "assets")
+    os.makedirs(assets)
+    dl = AssetDownloader()
+    dl.client = httpx.AsyncClient(transport=httpx.MockTransport(_handler))
+    try:
+        rewritten, downloaded = await dl.download_assets(
+            "https://cdn.example.com/", html, assets
+        )
+    finally:
+        await dl.client.aclose()
+
+    assert "169.254.169.254" in rewritten  # left as-is, not localized
+    assert "127.0.0.1" in rewritten
+    assert downloaded == []  # nothing fetched

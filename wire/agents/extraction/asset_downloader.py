@@ -7,6 +7,8 @@ import httpx
 import structlog
 from bs4 import BeautifulSoup
 
+from wire.utils.url_guard import is_disallowed_subresource
+
 logger = structlog.get_logger(__name__)
 
 URL_REGEX = re.compile(r"url\(\s*['\"]?(.*?)['\"]?\s*\)")
@@ -30,6 +32,13 @@ class AssetDownloader:
 
             base_reference_url = source_url if source_url else page_url
             full_url = urllib.parse.urljoin(base_reference_url, orig_url)
+
+            # Sub-resource SSRF guard: a (possibly attacker-controlled) page must
+            # not make the server fetch an internal address via an asset URL.
+            if is_disallowed_subresource(full_url):
+                logger.warning("asset_ssrf_blocked", url=full_url)
+                return orig_url
+
             parsed_url = urllib.parse.urlparse(full_url)
             filename = os.path.basename(parsed_url.path) or "index"
 
@@ -233,6 +242,9 @@ class AssetDownloader:
             # Let's cleanly fetch it
             try:
                 full_url = urllib.parse.urljoin(source_url, old_url)
+                if is_disallowed_subresource(full_url):
+                    logger.warning("css_asset_ssrf_blocked", url=full_url)
+                    continue
                 parsed_url = urllib.parse.urlparse(full_url)
                 filename = os.path.basename(parsed_url.path) or "index"
                 if not filename.endswith(

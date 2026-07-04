@@ -82,3 +82,31 @@ def check_public_http_url(url: str) -> None:
         raise ValueError(
             "URL is not an allowed public http(s) target (SSRF protection): " f"{url!r}"
         )
+
+
+def is_disallowed_subresource(url: str) -> bool:
+    """Fast SSRF check for sub-resource fetches (assets referenced by a page).
+
+    Blocks obvious internal targets — a literal private/loopback/link-local/
+    reserved IP (including the cloud metadata address) or a local hostname —
+    without a DNS lookup per asset. Hostname-based internal targets are already
+    covered by the full ``is_public_http_url`` check applied to the entry URL.
+    Non-http(s) references (``data:``, relative) are handled elsewhere and are
+    not flagged here.
+    """
+    try:
+        parsed = urlparse(url.strip())
+    except (ValueError, AttributeError):
+        return True
+    if parsed.scheme.lower() not in _ALLOWED_SCHEMES:
+        return False
+    host = (parsed.hostname or "").lower()
+    if not host:
+        return False
+    if host in _BLOCKED_HOST_NAMES or host.endswith(_BLOCKED_HOST_SUFFIXES):
+        return True
+    try:
+        ipaddress.ip_address(host)
+    except ValueError:
+        return False  # a hostname — entry-URL guard handles DNS-based cases
+    return _ip_is_blocked(host)
