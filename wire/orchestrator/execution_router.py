@@ -995,8 +995,17 @@ class ExecutionRouter:
         if not getattr(val, "value", None):
             return
         if isinstance(val, ImageValue):
-            processed = ImageIngestionPipeline.process(val.value, assets_dir)
+            processed = ImageIngestionPipeline.process(
+                val.value,
+                assets_dir,
+                original_filename=getattr(val, "original_filename", ""),
+            )
             val.value = processed["stored_path"]
+            # Carry derived understanding for accessible, well-fitted substitution.
+            val.alt_text = processed.get("alt_text")
+            val.dominant_color = processed.get("dominant_color")
+            val.width = processed.get("width")
+            val.height = processed.get("height")
         elif isinstance(val, VideoValue):
             processed = MediaIngestionPipeline.process(
                 val.value, assets_dir, kind="video"
@@ -1012,8 +1021,10 @@ class ExecutionRouter:
                 val.value, assets_dir, original_filename=val.original_filename
             )
             val.value = processed["stored_path"]
-            # Preserve extracted text so substitution/prompt can use it.
+            # Preserve extracted text + structure so substitution/prompt can use
+            # the right piece (title/summary/headings) rather than the whole blob.
             val.extracted_text = processed.get("extracted_text")
+            val.extracted_structure = processed.get("structure")
 
     def apply_brand(self, run_id: str, brand_tokens: Dict[str, Any]) -> Dict[str, Any]:
         """

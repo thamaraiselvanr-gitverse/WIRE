@@ -19,6 +19,11 @@ class ImageValue(BaseSubmittedValue):
     value: str  # Base64 encoded raw bytes
     original_filename: str
     content_type: str
+    # Understanding derived during ingestion (populated in place).
+    alt_text: Optional[str] = None
+    dominant_color: Optional[str] = None
+    width: Optional[int] = None
+    height: Optional[int] = None
 
 
 class VideoValue(BaseSubmittedValue):
@@ -42,6 +47,9 @@ class DocumentValue(BaseSubmittedValue):
     content_type: str
     # Text extracted from the document during ingestion (PDF/DOCX/text families).
     extracted_text: Optional[str] = None
+    # Structured understanding derived from the extracted text (title, headings,
+    # summary, emails, urls, counts) so the right slot gets the right piece.
+    extracted_structure: Optional[Dict] = None
 
 
 class UrlValue(BaseSubmittedValue):
@@ -94,6 +102,12 @@ class SubstitutedValueRef(BaseModel):
     # Optional text extracted from an uploaded document (e.g. PDF/DOCX),
     # available to the transformation prompt for content-aware substitution.
     extracted_text: Optional[str] = None
+    # Understanding derived from an uploaded image, so the transformation prompt
+    # can set accessible alt text and theme the slot to the image.
+    alt_text: Optional[str] = None
+    dominant_color: Optional[str] = None
+    # Structured fields (title/summary/headings/...) from an uploaded document.
+    structure: Optional[Dict] = None
 
 
 class ContentSubstitution(BaseModel):

@@ -122,5 +122,18 @@ class TransformationPromptGenerator:
                 entry["document_text"] = ref.extracted_text[
                     : TransformationPromptGenerator._MAX_DOC_TEXT_CHARS
                 ]
+            # Image understanding: accessible alt + palette hint for the slot.
+            if getattr(ref, "alt_text", None):
+                entry["alt_text"] = ref.alt_text
+            if getattr(ref, "dominant_color", None):
+                entry["dominant_color"] = ref.dominant_color
+            # Document structure: title/summary/headings for precise placement.
+            if getattr(ref, "structure", None):
+                struct = ref.structure or {}
+                entry["document_structure"] = {
+                    "title": struct.get("title"),
+                    "summary": struct.get("summary"),
+                    "headings": (struct.get("headings") or [])[:10],
+                }
             subs_data.append(entry)
         return subs_data

@@ -47,6 +47,13 @@ class SubstitutionMapper:
                             extracted_text=getattr(
                                 submitted_val, "extracted_text", None
                             ),
+                            alt_text=getattr(submitted_val, "alt_text", None),
+                            dominant_color=getattr(
+                                submitted_val, "dominant_color", None
+                            ),
+                            structure=getattr(
+                                submitted_val, "extracted_structure", None
+                            ),
                         ),
                         substitution_type=sub_type,
                     )
@@ -96,6 +103,13 @@ class SubstitutionMapper:
                                         value=val.value,
                                         extracted_text=getattr(
                                             val, "extracted_text", None
+                                        ),
+                                        alt_text=getattr(val, "alt_text", None),
+                                        dominant_color=getattr(
+                                            val, "dominant_color", None
+                                        ),
+                                        structure=getattr(
+                                            val, "extracted_structure", None
                                         ),
                                     ),
                                     substitution_type=sub_type,

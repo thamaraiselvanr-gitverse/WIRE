@@ -62,6 +62,7 @@ class DocumentIngestionPipeline:
             )
 
         text = cls._extract_text(data, ext)
+        structure = cls._structure(text)
 
         uploads_dir = os.path.join(target_dir, "user_uploads")
         os.makedirs(uploads_dir, exist_ok=True)
@@ -83,6 +84,8 @@ class DocumentIngestionPipeline:
             ext=ext,
             size=len(data),
             extracted_chars=len(text or ""),
+            title=structure.get("title"),
+            headings=len(structure.get("headings", [])),
             path=relative_reference,
         )
         return {
@@ -91,6 +94,81 @@ class DocumentIngestionPipeline:
             "char_count": len(text or ""),
             "content_type": cls._content_type(ext),
             "ext": ext,
+            "structure": structure,
+        }
+
+    # ── structured understanding ──
+    @classmethod
+    def _structure(cls, text: str) -> Dict[str, Any]:
+        """Derive queryable fields from flat text so content-aware substitution
+        can pull the right piece into the right slot instead of the whole blob.
+
+        - ``title``: the first substantial line.
+        - ``headings``: short heading-like lines (markdown ``#``, ALL CAPS, or
+          Title Case with no trailing punctuation).
+        - ``summary``: the first paragraph (block up to a blank line).
+        - ``emails`` / ``urls``: extracted contact/link references.
+        - ``word_count`` / ``line_count``.
+        """
+        if not text or not text.strip():
+            return {
+                "title": None,
+                "headings": [],
+                "summary": None,
+                "emails": [],
+                "urls": [],
+                "word_count": 0,
+                "line_count": 0,
+            }
+
+        lines = [ln.strip() for ln in text.splitlines()]
+        non_empty = [ln for ln in lines if ln]
+
+        title = None
+        for ln in non_empty:
+            if 2 <= len(ln) <= 120:
+                title = ln.lstrip("# ").strip()
+                break
+
+        headings = []
+        for ln in non_empty:
+            stripped = ln.lstrip("# ").strip()
+            if not (2 <= len(stripped) <= 80):
+                continue
+            is_md = ln.startswith("#")
+            is_caps = stripped.isupper() and any(c.isalpha() for c in stripped)
+            is_titlecase = (
+                stripped[-1] not in ".!?,:;"
+                and stripped == stripped.title()
+                and len(stripped.split()) <= 8
+            )
+            if is_md or is_caps or is_titlecase:
+                headings.append(stripped)
+            if len(headings) >= 20:
+                break
+
+        # First paragraph = first run of non-empty lines.
+        summary_lines: list[str] = []
+        started = False
+        for ln in lines:
+            if ln:
+                summary_lines.append(ln)
+                started = True
+            elif started:
+                break
+        summary = " ".join(summary_lines)[:500] or None
+
+        emails = sorted(set(re.findall(r"[\w.+-]+@[\w-]+\.[\w.-]+", text)))
+        urls = sorted(set(re.findall(r"https?://[^\s<>\"')]+", text)))
+
+        return {
+            "title": title,
+            "headings": headings,
+            "summary": summary,
+            "emails": emails[:20],
+            "urls": urls[:40],
+            "word_count": len(text.split()),
+            "line_count": len(non_empty),
         }
 
     # ── format detection ──
