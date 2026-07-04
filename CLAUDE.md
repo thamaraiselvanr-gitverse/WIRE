@@ -75,8 +75,9 @@ separate post-run APIs on `ExecutionRouter` that mutate a stored run's CIDS.
 
 ## LLM integration
 
-Gemini via `google.generativeai` (deprecated pkg — migrate to `google.genai`
-eventually). Key from `GEMINI_API_KEY` or `GOOGLE_API_KEY`; model override via
+Gemini via the `google-genai` SDK (`from google import genai`), the supported
+successor to the deprecated `google-generativeai` package. Key from
+`GEMINI_API_KEY` or `GOOGLE_API_KEY`; model override via
 `WIRE_LLM_MODEL` (default `gemini-2.0-flash`). All calls route through
 `LLMGuard` and **fail closed** (return `None` → heuristic fallback) when no key
 is set, so the pipeline runs offline. Live-LLM tests skip without a key.

@@ -1,5 +1,5 @@
-"""LLMClient transport paths without a real Gemini key (google.generativeai
-patched). Exercises init success/failure, the fail-closed no-key path, and every
+"""LLMClient transport paths without a real Gemini key (google-genai patched).
+Exercises init success/failure, the fail-closed no-key path, and every
 generate_json branch (valid dict, empty, non-dict, bad JSON, exception)."""
 
 import wire.semantic.llm_client as llm_mod
@@ -11,23 +11,23 @@ class _Resp:
         self.text = text
 
 
-class _Model:
+class _Models:
     _next_text = "{}"
     _raise = False
 
-    def __init__(self, *a, **k):
-        pass
-
-    def generate_content(self, content):
-        if _Model._raise:
+    def generate_content(self, *, model, contents, config):
+        if _Models._raise:
             raise RuntimeError("boom")
-        return _Resp(_Model._next_text)
+        return _Resp(_Models._next_text)
 
 
-def _patch_genai(monkeypatch):
-    monkeypatch.setattr(llm_mod.genai, "configure", lambda **k: None)
-    monkeypatch.setattr(llm_mod.genai, "GenerationConfig", lambda **k: object())
-    monkeypatch.setattr(llm_mod.genai, "GenerativeModel", _Model)
+class _FakeClient:
+    def __init__(self, *a, **k):
+        self.models = _Models()
+
+
+def _patch_client(monkeypatch):
+    monkeypatch.setattr(llm_mod.genai, "Client", _FakeClient)
 
 
 def test_no_key_is_unavailable_and_returns_none(monkeypatch):
@@ -40,9 +40,9 @@ def test_no_key_is_unavailable_and_returns_none(monkeypatch):
 
 def test_init_success_and_valid_json(monkeypatch):
     monkeypatch.setenv("GEMINI_API_KEY", "fake-key")
-    _patch_genai(monkeypatch)
-    _Model._raise = False
-    _Model._next_text = '{"a": 1, "b": 2}'
+    _patch_client(monkeypatch)
+    _Models._raise = False
+    _Models._next_text = '{"a": 1, "b": 2}'
     client = LLMClient()
     assert client.is_available is True
     assert client.generate_json("sys", "user") == {"a": 1, "b": 2}
@@ -50,41 +50,40 @@ def test_init_success_and_valid_json(monkeypatch):
 
 def test_init_failure_disables_client(monkeypatch):
     monkeypatch.setenv("GOOGLE_API_KEY", "fake-key")
-    _patch_genai(monkeypatch)
 
     def _boom(*a, **k):
-        raise RuntimeError("configure failed")
+        raise RuntimeError("client init failed")
 
-    monkeypatch.setattr(llm_mod.genai, "configure", _boom)
+    monkeypatch.setattr(llm_mod.genai, "Client", _boom)
     client = LLMClient()
     assert client.is_available is False
 
 
 def test_generate_json_empty_non_dict_and_bad_json(monkeypatch):
     monkeypatch.setenv("GEMINI_API_KEY", "fake-key")
-    _patch_genai(monkeypatch)
+    _patch_client(monkeypatch)
     client = LLMClient()
-    _Model._raise = False
+    _Models._raise = False
 
-    _Model._next_text = ""
+    _Models._next_text = ""
     assert client.generate_json("s", "u") is None  # empty
 
-    _Model._next_text = "[1, 2, 3]"
+    _Models._next_text = "[1, 2, 3]"
     assert client.generate_json("s", "u") is None  # valid JSON but not a dict
 
-    _Model._next_text = "not json at all"
+    _Models._next_text = "not json at all"
     assert client.generate_json("s", "u") is None  # JSONDecodeError
 
 
 def test_generate_json_swallows_call_exception(monkeypatch):
     monkeypatch.setenv("GEMINI_API_KEY", "fake-key")
-    _patch_genai(monkeypatch)
+    _patch_client(monkeypatch)
     client = LLMClient()
-    _Model._raise = True
+    _Models._raise = True
     try:
         assert client.generate_json("s", "u") is None
     finally:
-        _Model._raise = False
+        _Models._raise = False
 
 
 def test_model_name_override(monkeypatch):
