@@ -161,6 +161,11 @@ class ExecutionRouter:
         # Runtime behavioral capture (JS animation libraries, hover/focus state
         # deltas, scroll-triggered reveals). Off by default: the deep variant
         # adds several seconds of live interaction per page.
+        # Operator-supplied credentials for authenticated capture. Shape:
+        # {"cookies": [...], "headers": {...}, "storage": {"origin","local","session"}}.
+        # None (default) captures anonymously.
+        self.auth_credentials: Optional[dict] = None
+
         self.enable_behavioral_capture: bool = False
         # When behavioral capture is on, also measure carousel autoplay timing
         # and timed/exit-intent triggers (adds ~8-10s of bounded observation).
@@ -187,6 +192,9 @@ class ExecutionRouter:
             url, single_page=not self.enable_multi_page_crawl
         )
 
+        # Apply operator-supplied auth (cookies/headers/storage) if configured
+        # for capturing pages behind a login; None leaves capture unauthenticated.
+        self.browser.credentials = getattr(self, "auth_credentials", None)
         await self.browser.start()
         partial_results = []
         try:

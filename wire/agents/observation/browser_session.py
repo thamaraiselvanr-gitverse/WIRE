@@ -1,6 +1,9 @@
+from typing import Optional
+
 import structlog
 from playwright.async_api import Browser, BrowserContext, Page, async_playwright
 
+from wire.agents.observation.auth_handler import AuthHandler
 from wire.agents.observation.stealth import StealthManager
 from wire.utils.config import get_config
 
@@ -8,12 +11,15 @@ logger = structlog.get_logger(__name__)
 
 
 class BrowserSession:
-    def __init__(self):
+    def __init__(self, credentials: Optional[dict] = None):
         self.config = get_config()
         self.playwright = None
         self.browser: Browser = None
         self.context: BrowserContext = None
         self._is_active = False
+        # Optional operator-supplied auth (cookies/headers/storage) applied at
+        # context creation for capturing pages behind a login.
+        self.credentials = credentials
 
     async def start(self) -> None:
         logger.info("starting_playwright_session")
@@ -21,10 +27,15 @@ class BrowserSession:
         self.browser = await self.playwright.chromium.launch(
             headless=self.config.headless
         )
-        self.context = await self.browser.new_context(
-            user_agent=self.config.user_agent, viewport={"width": 1920, "height": 1080}
-        )
+        context_args = {
+            "user_agent": self.config.user_agent,
+            "viewport": {"width": 1920, "height": 1080},
+            **StealthManager.context_fingerprint(),
+        }
+        self.context = await self.browser.new_context(**context_args)
         await StealthManager.apply_stealth(self.context)
+        if self.credentials:
+            await AuthHandler.authenticate(self.context, self.credentials)
         await self.context.add_init_script("""
             const originalAttachShadow = Element.prototype.attachShadow;
             Element.prototype.attachShadow = function(init) {
