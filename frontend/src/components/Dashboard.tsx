@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Sparkles, Activity, FolderGit2 } from 'lucide-react';
-import api from '../api';
+import api, { API_BASE } from '../api';
 
 export default function TelemetryConsole() {
   const [logs, setLogs] = useState<string[]>([]);
@@ -12,7 +12,7 @@ export default function TelemetryConsole() {
     
     // In a real app we might proxy this or use fetch-event-source, but native works if the backend tolerates it
     // For now we'll use a standard EventSource mapping to our API.
-    const eventSource = new EventSource(`http://localhost:8000/api/projects/telemetry`);
+    const eventSource = new EventSource(`${API_BASE}/projects/telemetry`);
     
     eventSource.onmessage = (event) => {
       setLogs((prev) => [...prev.slice(-49), event.data]);
@@ -414,7 +414,7 @@ export function CommandCenter() {
                   <div>
                     <h4 style={{ fontSize: '1rem', marginBottom: '12px' }}>Desktop Capture (1920px)</h4>
                     <img 
-                      src={`http://localhost:8000/api/projects/${selectedProject.id}/files/assets/capture_desktop.png?token=${token}`} 
+                      src={`${API_BASE}/projects/${selectedProject.id}/files/assets/capture_desktop.png?token=${token}`} 
                       alt="Desktop View" 
                       style={{ width: '100%', borderRadius: '8px', border: '1px solid var(--panel-border)', background: '#000' }}
                     />
@@ -423,7 +423,7 @@ export function CommandCenter() {
                     <div>
                       <h4 style={{ fontSize: '1rem', marginBottom: '12px' }}>Tablet Capture (768px)</h4>
                       <img 
-                        src={`http://localhost:8000/api/projects/${selectedProject.id}/files/assets/capture_tablet.png?token=${token}`} 
+                        src={`${API_BASE}/projects/${selectedProject.id}/files/assets/capture_tablet.png?token=${token}`} 
                         alt="Tablet View" 
                         style={{ width: '100%', borderRadius: '8px', border: '1px solid var(--panel-border)', background: '#000' }}
                       />
@@ -431,7 +431,7 @@ export function CommandCenter() {
                     <div>
                       <h4 style={{ fontSize: '1rem', marginBottom: '12px' }}>Mobile Capture (375px)</h4>
                       <img 
-                        src={`http://localhost:8000/api/projects/${selectedProject.id}/files/assets/capture_mobile.png?token=${token}`} 
+                        src={`${API_BASE}/projects/${selectedProject.id}/files/assets/capture_mobile.png?token=${token}`} 
                         alt="Mobile View" 
                         style={{ width: '100%', borderRadius: '8px', border: '1px solid var(--panel-border)', background: '#000' }}
                       />
@@ -464,7 +464,7 @@ export function CommandCenter() {
                     <iframe
                       key={previewVersion}
                       title="Editable reconstruction preview"
-                      src={`http://localhost:8000/api/projects/${selectedProject.id}/files/output_editable.html?token=${token}&v=${previewVersion}`}
+                      src={`${API_BASE}/projects/${selectedProject.id}/files/output_editable.html?token=${token}&v=${previewVersion}`}
                       style={{ width: '100%', height: '100%', border: 'none', background: '#fff' }}
                     />
                   </div>
