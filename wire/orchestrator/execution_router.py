@@ -8,6 +8,7 @@ from wire.agents.exploration.crawler import Crawler
 from wire.agents.exploration.fuzzer import InteractionFuzzer
 from wire.agents.exploration.region_probe import RegionProbe
 from wire.agents.extraction.asset_downloader import AssetDownloader
+from wire.agents.extraction.behavioral_extractor import BehavioralExtractor
 from wire.agents.extraction.comprehensive_extractor import ComprehensiveExtractor
 from wire.agents.extraction.design_analyzer import DesignAnalyzer
 from wire.agents.extraction.interaction_recorder import InteractionRecorder
@@ -116,6 +117,7 @@ class ExecutionRouter:
         self.spa_detector = SPADetector()
         self.network_monitor = NetworkMonitor()
         self.comprehensive_extractor = ComprehensiveExtractor()
+        self.behavioral_extractor = BehavioralExtractor()
         self.prompt_generator = PromptGenerator()
         self.knowledge_index = KnowledgeIndex()
 
@@ -155,6 +157,14 @@ class ExecutionRouter:
         # Off by default to preserve existing single-page pipeline behavior;
         # set True to crawl and reconstruct the full same-domain site map.
         self.enable_multi_page_crawl: bool = False
+
+        # Runtime behavioral capture (JS animation libraries, hover/focus state
+        # deltas, scroll-triggered reveals). Off by default: the deep variant
+        # adds several seconds of live interaction per page.
+        self.enable_behavioral_capture: bool = False
+        # When behavioral capture is on, also measure carousel autoplay timing
+        # and timed/exit-intent triggers (adds ~8-10s of bounded observation).
+        self.behavioral_deep: bool = False
 
     async def execute_pipeline(self, url: str) -> float:
         logger.info("executing_full_pipeline", url=url)
@@ -314,6 +324,16 @@ class ExecutionRouter:
             # animations, breakpoints, icon library, a11y + component inventory.
             extraction_report = await self.comprehensive_extractor.extract(page_obj)
             self._save_json("extraction_report.json", extraction_report)
+
+            # ── Runtime behavioral capture (opt-in) ──
+            # Drives the live page: JS animation-library detection, per-component
+            # hover/focus computed-style deltas, scroll-triggered reveals, and
+            # (deep) carousel autoplay + timed/exit-intent triggers.
+            if self.enable_behavioral_capture:
+                behavior_report = await self.behavioral_extractor.extract(
+                    page_obj, deep=self.behavioral_deep
+                )
+                self._save_json("behavior_report.json", behavior_report)
 
             # ── Phase 2: Viewport captures ──
             viewport_results = await self.viewport_renderer.capture_viewports(
