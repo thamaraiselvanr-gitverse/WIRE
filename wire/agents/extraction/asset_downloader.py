@@ -42,10 +42,23 @@ class AssetDownloader:
                     ".gif",
                     ".svg",
                     ".webp",
+                    ".avif",
+                    ".ico",
                     ".woff",
                     ".woff2",
                     ".ttf",
                     ".eot",
+                    ".mp4",
+                    ".webm",
+                    ".ogg",
+                    ".ogv",
+                    ".mov",
+                    ".m4v",
+                    ".mp3",
+                    ".wav",
+                    ".m4a",
+                    ".vtt",
+                    ".webmanifest",
                 )
             ):
                 ext_map = {"link": ".css", "script": ".js", "img": ".png", "bg": ".png"}
@@ -87,6 +100,27 @@ class AssetDownloader:
 
         self._process_css_urls_proxy = fetch_and_save
 
+        async def rewrite_srcset(value: str, asset_type: str) -> str:
+            """Localize each candidate in a ``srcset`` list, keeping descriptors.
+
+            A ``srcset`` is ``url [descriptor]`` entries joined by commas, e.g.
+            ``a.jpg 1x, b.jpg 2x`` or ``a.jpg 400w, b.jpg 800w``.
+            """
+            out = []
+            for candidate in value.split(","):
+                candidate = candidate.strip()
+                if not candidate:
+                    continue
+                bits = candidate.split(None, 1)
+                url = bits[0]
+                descriptor = f" {bits[1]}" if len(bits) > 1 else ""
+                if url.startswith("data:"):
+                    out.append(f"{url}{descriptor}")
+                else:
+                    new_url = await fetch_and_save(url, asset_type)
+                    out.append(f"{new_url}{descriptor}")
+            return ", ".join(out)
+
         # 1. External CSS
         for tag in soup.find_all("link", rel="stylesheet"):
             if tag.get("href"):
@@ -112,6 +146,48 @@ class AssetDownloader:
             if tag.get("src"):
                 new_src = await fetch_and_save(tag["src"], "img")
                 tag["src"] = new_src
+
+        # 3b. Responsive-image srcset + lazy-loading data attributes on <img>.
+        for tag in soup.find_all("img"):
+            if tag.get("srcset"):
+                tag["srcset"] = await rewrite_srcset(str(tag["srcset"]), "img")
+            if tag.get("data-srcset"):
+                tag["data-srcset"] = await rewrite_srcset(
+                    str(tag["data-srcset"]), "img"
+                )
+            for attr in ("data-src", "data-original", "data-lazy-src", "data-fallback"):
+                if tag.get(attr):
+                    tag[attr] = await fetch_and_save(str(tag[attr]), "img")
+
+        # 3c. <picture>/<video>/<audio> <source> variants (srcset or src).
+        for tag in soup.find_all("source"):
+            if tag.get("srcset"):
+                tag["srcset"] = await rewrite_srcset(str(tag["srcset"]), "img")
+            if tag.get("src"):
+                tag["src"] = await fetch_and_save(str(tag["src"]), "media")
+
+        # 3d. Media elements: <video>/<audio> src, poster image, <track> src.
+        for tag in soup.find_all(["video", "audio"]):
+            if tag.get("src"):
+                tag["src"] = await fetch_and_save(str(tag["src"]), "media")
+            if tag.get("poster"):
+                tag["poster"] = await fetch_and_save(str(tag["poster"]), "img")
+        for tag in soup.find_all("track", src=True):
+            tag["src"] = await fetch_and_save(str(tag["src"]), "media")
+
+        # 3e. Icons, favicons, and web-app manifest.
+        icon_rels = {
+            "icon",
+            "shortcut icon",
+            "apple-touch-icon",
+            "apple-touch-icon-precomposed",
+            "mask-icon",
+            "manifest",
+        }
+        for tag in soup.find_all("link", href=True):
+            rels = {r.lower() for r in (tag.get("rel") or [])}
+            if rels & icon_rels:
+                tag["href"] = await fetch_and_save(str(tag["href"]), "icon")
 
         # 4. Inline <style> tags
         for tag in soup.find_all("style"):
