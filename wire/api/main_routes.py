@@ -74,42 +74,18 @@ async def start_reconstruction(
             "(internal/private/loopback targets are not allowed).",
         )
 
-    # Create project record
-    project = Project(url=req.url, owner_id=current_user.id, status="running")
+    # Create the project and enqueue a durable job. A separate worker
+    # (python -m wire.worker) drains the queue, so the work survives an API
+    # restart and is retried on failure instead of being a fire-and-forget task.
+    from wire.api.job_queue import enqueue
+
+    project = Project(url=req.url, owner_id=current_user.id, status="pending")
     db.add(project)
     await db.commit()
     await db.refresh(project)
+    await enqueue(db, int(project.id), req.url)
 
-    # In a real background setup we'd dispatch to Celery/Redis queue.
-    # For now we'll simulate a start.
-    asyncio.create_task(run_background_pipeline(int(project.id), req.url))
-
-    return {"message": "Reconstruction started", "project_id": project.id}
-
-
-async def run_background_pipeline(project_id: int, url: str) -> None:
-    # This acts as the bridge layer calling the wire.orchestrator
-    try:
-        from wire.api.database import AsyncSessionLocal
-        from wire.orchestrator.execution_router import ExecutionRouter
-
-        async with AsyncSessionLocal() as db:
-            project = await db.get(Project, project_id)
-            if not project:
-                return
-
-            router = ExecutionRouter()
-            fidelity = await router.execute_pipeline(url)
-
-            project.status = "completed"
-            project.fidelity_score = fidelity
-            await db.commit()
-    except Exception:
-        async with AsyncSessionLocal() as db:
-            project = await db.get(Project, project_id)
-            if project:
-                project.status = "failed"
-                await db.commit()
+    return {"message": "Reconstruction queued", "project_id": project.id}
 
 
 # response_model=None: return SQLAlchemy ORM rows directly via jsonable_encoder;

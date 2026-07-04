@@ -1,4 +1,13 @@
-from sqlalchemy import Boolean, Column, DateTime, Float, ForeignKey, Integer, String
+from sqlalchemy import (
+    Boolean,
+    Column,
+    DateTime,
+    Float,
+    ForeignKey,
+    Integer,
+    String,
+    Text,
+)
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 
@@ -31,6 +40,30 @@ class Project(Base):  # type: ignore[misc]
     owner_id = Column(Integer, ForeignKey("users.id"))
     owner = relationship("User", back_populates="projects")
     template = relationship("TemplateMeta", back_populates="project", uselist=False)
+
+
+class ReconstructionJob(Base):  # type: ignore[misc]
+    """A durable, persisted unit of reconstruction work.
+
+    Replaces fire-and-forget background tasks: jobs survive restarts, can be
+    claimed by a worker, and are retried on failure until ``max_attempts``.
+    """
+
+    __tablename__ = "reconstruction_jobs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    project_id = Column(Integer, ForeignKey("projects.id"), nullable=False, index=True)
+    url = Column(String, nullable=False)
+    # pending -> running -> completed | failed  (failed only after max_attempts)
+    status = Column(String, default="pending", index=True, nullable=False)
+    attempts = Column(Integer, default=0, nullable=False)
+    max_attempts = Column(Integer, default=3, nullable=False)
+    error = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    started_at = Column(DateTime(timezone=True), nullable=True)
+    updated_at = Column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
 
 
 class TemplateMeta(Base):  # type: ignore[misc]

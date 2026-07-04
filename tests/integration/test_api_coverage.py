@@ -55,7 +55,7 @@ def test_start_reconstruction_creates_project(client):
     assert resp.status_code == 200
     body = resp.json()
     assert body["project_id"] >= 1
-    assert "started" in body["message"].lower()
+    assert "queued" in body["message"].lower()
 
     # The new project shows up in the owner's list.
     listing = client.get("/api/projects", headers=headers)
@@ -180,43 +180,32 @@ def test_start_reconstruction_rejects_ssrf_url(client, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_run_background_pipeline_success_failure_and_missing(client, monkeypatch):
-    from wire.api import main_routes
+async def test_start_reconstruction_enqueues_durable_job(client):
+    # Creating a project persists a pending job that a worker later drains,
+    # rather than firing a task that would be lost on restart.
+    from wire import worker
     from wire.api.database import AsyncSessionLocal
     from wire.api.models import Project
 
-    token = _register(client, "bg")
+    token = _register(client, "queue")
     headers = {"Authorization": f"Bearer {token}"}
     pid = client.post(
-        "/api/projects", json={"url": "https://bg.test"}, headers=headers
+        "/api/projects", json={"url": "https://queued.test"}, headers=headers
     ).json()["project_id"]
 
-    # Success: pipeline returns a score -> project marked completed.
-    async def _ok(self, url):
-        return 77.0
-
-    monkeypatch.setattr(
-        "wire.orchestrator.execution_router.ExecutionRouter.execute_pipeline", _ok
-    )
-    await main_routes.run_background_pipeline(pid, "https://bg.test")
     async with AsyncSessionLocal() as db:
-        p = await db.get(Project, pid)
-        assert p.status == "completed" and p.fidelity_score == 77.0
+        assert (await db.get(Project, pid)).status == "pending"
 
-    # Failure: pipeline raises -> project marked failed.
-    async def _boom(self, url):
-        raise RuntimeError("pipeline exploded")
+    # Drain the queue with a stubbed pipeline; this project ends up completed.
+    async def _ok(url):
+        return 91.0
 
-    monkeypatch.setattr(
-        "wire.orchestrator.execution_router.ExecutionRouter.execute_pipeline", _boom
-    )
-    await main_routes.run_background_pipeline(pid, "https://bg.test")
+    for _ in range(25):
+        if not await worker.process_one(AsyncSessionLocal, _ok):
+            break
+
     async with AsyncSessionLocal() as db:
-        p = await db.get(Project, pid)
-        assert p.status == "failed"
-
-    # Unknown project id -> returns quietly without raising.
-    await main_routes.run_background_pipeline(9_999_999, "https://bg.test")
+        assert (await db.get(Project, pid)).status == "completed"
 
 
 def test_file_route_valid_token_but_deleted_user_401(client, monkeypatch):
