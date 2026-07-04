@@ -18,5 +18,18 @@ api.interceptors.request.use((config) => {
   return config;
 });
 
+/** Extract a human-readable message from an API/network error without `any`. */
+export function apiErrorMessage(
+  err: unknown,
+  fallback = 'An error occurred.',
+): string {
+  if (axios.isAxiosError(err)) {
+    const data = err.response?.data as { detail?: string } | undefined;
+    return data?.detail || err.message || fallback;
+  }
+  if (err instanceof Error) return err.message;
+  return fallback;
+}
+
 export default api;
  

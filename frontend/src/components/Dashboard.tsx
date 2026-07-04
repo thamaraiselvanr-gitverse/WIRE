@@ -1,6 +1,27 @@
 import { useState, useEffect } from 'react';
 import { Sparkles, Activity, FolderGit2 } from 'lucide-react';
-import api, { API_BASE } from '../api';
+import api, { API_BASE, apiErrorMessage } from '../api';
+
+interface Project {
+  id: number;
+  url: string;
+  status: string;
+  fidelity_score?: number | null;
+}
+
+interface SchemaField {
+  field_id: string;
+  field_type: string;
+  label?: string;
+  required?: boolean;
+}
+
+interface SubmittedField {
+  type: string;
+  value: string;
+  original_filename?: string;
+  content_type?: string;
+}
 
 export default function TelemetryConsole() {
   const [logs, setLogs] = useState<string[]>([]);
@@ -47,8 +68,8 @@ export default function TelemetryConsole() {
 
 export function CommandCenter() {
   const [url, setUrl] = useState('');
-  const [projects, setProjects] = useState<any[]>([]);
-  const [selectedProject, setSelectedProject] = useState<any | null>(null);
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [selectedProject, setSelectedProject] = useState<Project | null>(null);
   const [activeTab, setActiveTab] = useState<'visuals' | 'preview' | 'content' | 'code' | 'prompts'>('visuals');
   const [codeType, setCodeType] = useState<'react' | 'vue' | 'html'>('react');
   const [fileContent, setFileContent] = useState<string>('');
@@ -61,8 +82,8 @@ export function CommandCenter() {
   const [brandMessage, setBrandMessage] = useState('');
   const [previewVersion, setPreviewVersion] = useState(0);
   // Content-editor (multi-modal input) state.
-  const [schemaFields, setSchemaFields] = useState<any[]>([]);
-  const [contentValues, setContentValues] = useState<Record<string, any>>({});
+  const [schemaFields, setSchemaFields] = useState<SchemaField[]>([]);
+  const [contentValues, setContentValues] = useState<Record<string, string | File>>({});
   const [contentBusy, setContentBusy] = useState(false);
   const [contentMessage, setContentMessage] = useState('');
 
@@ -85,6 +106,10 @@ export function CommandCenter() {
       setSchemaFields([]);
       setContentValues({});
     }
+    // The fetch helpers are stable for the current selection; re-running only on
+    // these keys is intentional (adding them would require useCallback and cause
+    // redundant refetches).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedProject, activeTab, codeType]);
 
   const fetchSchema = async () => {
@@ -121,7 +146,7 @@ export function CommandCenter() {
     setContentBusy(true);
     setContentMessage('');
     try {
-      const fieldValues: Record<string, any> = {};
+      const fieldValues: Record<string, SubmittedField> = {};
       for (const field of schemaFields) {
         const entry = contentValues[field.field_id];
         if (entry === undefined || entry === null || entry === '') continue;
@@ -148,12 +173,12 @@ export function CommandCenter() {
         setPreviewVersion((v) => v + 1);
       } else {
         const errs = (data.validation_report?.hard_failures || [])
-          .map((f: any) => `${f.field_id}: ${f.message}`)
+          .map((f: { field_id: string; message: string }) => `${f.field_id}: ${f.message}`)
           .join('; ');
         setContentMessage(`Validation failed — ${errs || 'see server logs.'}`);
       }
-    } catch (e: any) {
-      setContentMessage(`Submission failed: ${e?.response?.data?.detail || e.message}`);
+    } catch (e) {
+      setContentMessage(`Submission failed: ${apiErrorMessage(e)}`);
       console.error(e);
     } finally {
       setContentBusy(false);
@@ -501,7 +526,7 @@ export function CommandCenter() {
                             {ft === 'textarea' ? (
                               <textarea
                                 rows={3}
-                                value={contentValues[field.field_id] || ''}
+                                value={(contentValues[field.field_id] as string) || ''}
                                 onChange={(e) => setContentValues((v) => ({ ...v, [field.field_id]: e.target.value }))}
                                 style={{ width: '100%', background: '#050608', color: '#dfdfe6', border: '1px solid var(--panel-border)', borderRadius: '6px', padding: '8px' }}
                               />
@@ -509,13 +534,13 @@ export function CommandCenter() {
                               <input
                                 type="file"
                                 accept={accept}
-                                onChange={(e) => setContentValues((v) => ({ ...v, [field.field_id]: e.target.files?.[0] }))}
+                                onChange={(e) => { const file = e.target.files?.[0]; if (file) setContentValues((v) => ({ ...v, [field.field_id]: file })); }}
                                 style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}
                               />
                             ) : (
                               <input
                                 type={ft === 'url' ? 'url' : 'text'}
-                                value={contentValues[field.field_id] || ''}
+                                value={(contentValues[field.field_id] as string) || ''}
                                 onChange={(e) => setContentValues((v) => ({ ...v, [field.field_id]: e.target.value }))}
                                 style={{ width: '100%', background: '#050608', color: '#dfdfe6', border: '1px solid var(--panel-border)', borderRadius: '6px', padding: '8px' }}
                               />

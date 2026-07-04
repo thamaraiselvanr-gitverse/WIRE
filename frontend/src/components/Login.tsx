@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Sparkles, Lock, User, Mail } from 'lucide-react';
-import api from '../api';
+import api, { apiErrorMessage } from '../api';
 
 export default function Login() {
   const [isLogin, setIsLogin] = useState(true);
@@ -26,8 +26,8 @@ export default function Login() {
         localStorage.setItem('wire_token', data.access_token);
       }
       navigate('/dashboard');
-    } catch (err: any) {
-      setError(err.response?.data?.detail || 'An error occurred during authentication.');
+    } catch (err) {
+      setError(apiErrorMessage(err, 'An error occurred during authentication.'));
     }
   };
 
