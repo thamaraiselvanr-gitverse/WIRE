@@ -17,6 +17,7 @@ import structlog
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from wire.api import job_queue
+from wire.utils.errors import ComplianceError
 
 logger = structlog.get_logger(__name__)
 
@@ -46,7 +47,13 @@ async def process_one(session_factory: SessionFactory, runner: Runner) -> bool:
 
     try:
         fidelity = await runner(url)
-    except Exception as e:  # pragma: no cover - exercised via injected runner
+    except ComplianceError as e:
+        # Legal/policy block (e.g. robots.txt) — never retry.
+        logger.warning("job_blocked_compliance", job_id=job_id, error=str(e))
+        async with session_factory() as db:
+            await job_queue.fail_permanent(db, job_id, str(e))
+        return True
+    except Exception as e:
         logger.error("job_run_failed", job_id=job_id, error=str(e))
         async with session_factory() as db:
             await job_queue.fail(db, job_id, str(e))

@@ -76,6 +76,7 @@ from wire.templates.preview import TemplatePreview
 from wire.templates.registry import TemplateRegistry
 from wire.templates.tokens import DesignTokenSystem
 from wire.templates.versioning import TemplateVersioning
+from wire.utils.errors import ComplianceError
 from wire.utils.fidelity_scorer import FidelityScorer
 from wire.validation.structural import StructuralValidator
 from wire.validation.visual_diff import VisualDiff
@@ -171,6 +172,20 @@ class ExecutionRouter:
         # and timed/exit-intent triggers (adds ~8-10s of bounded observation).
         self.behavioral_deep: bool = False
 
+        # Refuse to reconstruct targets whose robots.txt disallows crawling.
+        # On by default; set False only for explicitly authorized captures.
+        self.respect_robots: bool = True
+
+    def _check_compliance(self, legal_result: Dict[str, Any]) -> None:
+        """Abort (ComplianceError) when robots.txt disallows and respect_robots."""
+        if self.respect_robots and legal_result.get("classification") == "restricted":
+            logger.warning(
+                "reconstruction_blocked_by_robots", url=legal_result.get("url")
+            )
+            raise ComplianceError(
+                "Target disallows crawling via robots.txt; reconstruction refused."
+            )
+
     async def execute_pipeline(self, url: str) -> float:
         logger.info("executing_full_pipeline", url=url)
 
@@ -186,6 +201,7 @@ class ExecutionRouter:
         # ── Phase 3: Legal compliance ──
         legal_result = await self.legal_detector.analyze(url)
         self._save_json("compliance_report.json", legal_result)
+        self._check_compliance(legal_result)
 
         # ── Phase 1: Crawl ──
         pages = await self.crawler.crawl(

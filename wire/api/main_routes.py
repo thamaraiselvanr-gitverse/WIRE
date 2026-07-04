@@ -1,8 +1,10 @@
 import asyncio
+from datetime import datetime, timedelta, timezone
 from typing import Any, AsyncGenerator, Dict, List
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
+from sqlalchemy import func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sse_starlette.sse import EventSourceResponse
@@ -58,6 +60,10 @@ async def start_reconstruction(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> Dict[str, Any]:
+    from wire.api.metrics import counter
+
+    counter("reconstructions_requested_total").inc()
+
     # Rate limit the expensive reconstruction endpoint per user.
     from wire.api.rate_limit import reconstruction_limiter
 
@@ -72,6 +78,22 @@ async def start_reconstruction(
             status_code=400,
             detail="URL must be a public http(s) address "
             "(internal/private/loopback targets are not allowed).",
+        )
+
+    # Per-user daily quota (abuse control on top of the per-minute rate limit).
+    from wire.api.quota import daily_reconstruction_quota
+
+    quota = daily_reconstruction_quota()
+    cutoff = datetime.now(timezone.utc) - timedelta(days=1)
+    used = await db.scalar(
+        select(func.count())
+        .select_from(Project)
+        .where(Project.owner_id == current_user.id, Project.created_at >= cutoff)
+    )
+    if used is not None and used >= quota:
+        raise HTTPException(
+            status_code=429,
+            detail=f"Daily reconstruction quota ({quota}) reached. Try again later.",
         )
 
     # Create the project and enqueue a durable job. A separate worker

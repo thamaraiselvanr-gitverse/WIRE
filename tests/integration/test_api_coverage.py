@@ -208,6 +208,23 @@ async def test_start_reconstruction_enqueues_durable_job(client):
         assert (await db.get(Project, pid)).status == "completed"
 
 
+def test_daily_quota_enforced(client, monkeypatch):
+    monkeypatch.setattr("wire.api.quota.daily_reconstruction_quota", lambda: 1)
+    token = _register(client, "quota")
+    headers = {"Authorization": f"Bearer {token}"}
+
+    first = client.post(
+        "/api/projects", json={"url": "https://a.example.com"}, headers=headers
+    )
+    assert first.status_code == 200
+    # Second within the day exceeds the quota of 1.
+    second = client.post(
+        "/api/projects", json={"url": "https://b.example.com"}, headers=headers
+    )
+    assert second.status_code == 429
+    assert "quota" in second.json()["detail"].lower()
+
+
 def test_file_route_valid_token_but_deleted_user_401(client, monkeypatch):
     # A validly-signed token whose subject no longer exists -> 401.
     from wire.api.auth import create_access_token
