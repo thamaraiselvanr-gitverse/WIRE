@@ -14,6 +14,7 @@ import structlog
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from .metrics import counter
 from .models import Project, ReconstructionJob
 
 logger = structlog.get_logger(__name__)
@@ -25,6 +26,7 @@ async def enqueue(db: AsyncSession, project_id: int, url: str) -> Reconstruction
     db.add(job)
     await db.commit()
     await db.refresh(job)
+    counter("jobs_enqueued_total").inc()
     logger.info("job_enqueued", job_id=job.id, project_id=project_id)
     return job
 
@@ -85,6 +87,7 @@ async def complete(db: AsyncSession, job_id: int, fidelity: float) -> None:
         )
     )
     await db.commit()
+    counter("jobs_completed_total").inc()
     logger.info("job_completed", job_id=job_id, fidelity=fidelity)
 
 
@@ -102,6 +105,7 @@ async def fail(db: AsyncSession, job_id: int, error: str) -> None:
         await db.execute(
             update(Project).where(Project.id == job.project_id).values(status="failed")
         )
+        counter("jobs_failed_total").inc()
         logger.warning("job_failed_permanently", job_id=job_id, attempts=job.attempts)
     else:
         await db.execute(
@@ -111,6 +115,24 @@ async def fail(db: AsyncSession, job_id: int, error: str) -> None:
         )
         logger.warning("job_failed_will_retry", job_id=job_id, attempts=job.attempts)
     await db.commit()
+
+
+async def fail_permanent(db: AsyncSession, job_id: int, error: str) -> None:
+    """Fail a job immediately without retrying (e.g. a compliance block)."""
+    job = await db.get(ReconstructionJob, job_id)
+    if job is None:
+        return
+    await db.execute(
+        update(ReconstructionJob)
+        .where(ReconstructionJob.id == job_id)
+        .values(status="failed", error=error[:2000])
+    )
+    await db.execute(
+        update(Project).where(Project.id == job.project_id).values(status="failed")
+    )
+    await db.commit()
+    counter("jobs_failed_total").inc()
+    logger.warning("job_failed_permanent", job_id=job_id)
 
 
 async def recover_stale(db: AsyncSession, older_than_seconds: float = 1800) -> int:

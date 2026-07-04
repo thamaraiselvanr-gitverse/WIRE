@@ -144,6 +144,30 @@ async def test_run_worker_bounded_drains_queue(session_factory):
         assert job.status == "completed"
 
 
+@pytest.mark.asyncio
+async def test_worker_compliance_error_fails_permanently(session_factory):
+    from wire.utils.errors import ComplianceError
+
+    pid = await _make_project(session_factory)
+    async with session_factory() as db:
+        # max_attempts high — a compliance block must still fail immediately.
+        job = ReconstructionJob(
+            project_id=pid, url="https://x.test", status="pending", max_attempts=5
+        )
+        db.add(job)
+        await db.commit()
+
+    async def blocked(url):
+        raise ComplianceError("robots.txt disallows")
+
+    await worker.process_one(session_factory, blocked)
+    async with session_factory() as db:
+        job = (await db.execute(_all(ReconstructionJob))).scalars().first()
+        proj = await db.get(Project, pid)
+        assert job.status == "failed" and job.attempts == 1  # no retry
+        assert proj.status == "failed"
+
+
 def _all(model):
     from sqlalchemy import select
 
