@@ -1,3 +1,5 @@
+from collections import Counter
+
 import structlog
 
 from wire.compilers.sanitizer import HtmlSanitizer
@@ -5,6 +7,10 @@ from wire.compilers.style_emission import render_css
 from wire.schema.canonical import CanonicalDesignSchema, ComponentNode
 
 logger = structlog.get_logger(__name__)
+
+# Inline style strings repeated at least this many times across the tree are
+# promoted to a shared CSS class instead of being duplicated on every element.
+_DEDUP_MIN_OCCURRENCES = 2
 
 
 class HTMLCompiler:
@@ -23,8 +29,8 @@ class HTMLCompiler:
     ) -> str:
         """Compile the CIDS tree to a complete, standalone HTML5 document with a
         proper <head> carrying the generated stylesheet (webfonts, animations,
-        breakpoints, interaction states) so the editable reconstruction opens
-        faithfully on its own."""
+        breakpoints, interaction states, and deduplicated style classes) so the
+        editable reconstruction opens faithfully on its own."""
         body, css = self._compile_parts(cids, injected_data, unwrap_root=True)
         doc_title = title or cids.url or "WIRE reconstruction"
         head_parts = [
@@ -42,6 +48,32 @@ class HTMLCompiler:
             f"<body>\n{body}\n</body>\n"
             "</html>\n"
         )
+
+    @staticmethod
+    def _inline_style(node: ComponentNode) -> str:
+        """The node's sanitized inline-style declaration string (or "")."""
+        parts = []
+        for k, v in node.styles.items():
+            sanitized_val = HtmlSanitizer._sanitize_style_string(v)
+            if sanitized_val:
+                parts.append(f"{k}: {sanitized_val}")
+        return "; ".join(parts)
+
+    @classmethod
+    def _style_frequency(cls, node: ComponentNode, counter: "Counter[str]") -> None:
+        """Count how often each inline-style string occurs, mirroring the skip
+        rules of ``render_node`` so only styles that will actually render are
+        eligible for class extraction."""
+        if node.tag in HtmlSanitizer.UNSAFE_TAGS and node.tag != "#shadow-root":
+            return
+        if node.tag not in ("#text", "#shadow-root"):
+            style = cls._inline_style(node)
+            if style:
+                counter[style] += 1
+        if node.shadow_root:
+            cls._style_frequency(node.shadow_root, counter)
+        for child in node.children:
+            cls._style_frequency(child, counter)
 
     def _compile_parts(
         self,
@@ -65,6 +97,17 @@ class HTMLCompiler:
         responsive_rules: dict[str, list] = {}
         pseudo_rules: list = []
         self._gen_class_counter = 0
+
+        # ── Pass 1: find repeated inline-style strings and mint a class each ──
+        root_for_scan = cids.root
+        freq: Counter[str] = Counter()
+        self._style_frequency(root_for_scan, freq)
+        shared_styles: dict[str, str] = {}
+        for idx, (style, count) in enumerate(
+            sorted(freq.items(), key=lambda kv: (-kv[1], kv[0])), start=1
+        ):
+            if count >= _DEDUP_MIN_OCCURRENCES:
+                shared_styles[style] = f"wire-cls-{idx}"
 
         def _sanitize_props(props: dict) -> dict:
             safe = {}
@@ -121,38 +164,40 @@ class HTMLCompiler:
                 for pseudo, safe_props in collected_pseudo.items():
                     pseudo_rules.append((gen_class, pseudo, safe_props))
 
+            # Determine this node's inline style and whether it was deduplicated
+            # into a shared class (Pass 1). Deduplicated nodes drop the inline
+            # attribute and wear the class instead.
+            inline_style = self._inline_style(node)
+            dedup_class = shared_styles.get(inline_style)
+
+            extra_classes = [c for c in (gen_class, dedup_class) if c]
+
             # Sanitize attributes (defense-in-depth)
             attrs_parts = []
-            merged_class = None
+            class_written = False
             for k, v in node.attributes.items():
                 if k.lower().startswith("on"):
                     continue
                 if k.lower() in {"href", "src", "action", "formaction"}:
                     if not HtmlSanitizer._is_safe_uri(v):
                         continue
-                if k.lower() == "class" and gen_class:
-                    merged_class = f"{v} {gen_class}"
-                    attrs_parts.append(f'class="{merged_class}"')
+                if k.lower() == "class":
+                    all_classes = " ".join([v, *extra_classes]) if extra_classes else v
+                    attrs_parts.append(f'class="{all_classes}"')
+                    class_written = True
                     continue
                 attrs_parts.append(f'{k}="{v}"')
-            # Add the generated class if the node had no existing class attribute.
-            if gen_class and merged_class is None:
-                attrs_parts.append(f'class="{gen_class}"')
+            # Add generated/dedup classes if the node had no class attribute.
+            if extra_classes and not class_written:
+                attrs_parts.append(f'class="{" ".join(extra_classes)}"')
 
             attrs = " ".join(attrs_parts)
             if attrs:
                 attrs = " " + attrs
 
-            # Sanitize style properties (defense-in-depth)
-            style_parts = []
-            for k, v in node.styles.items():
-                sanitized_val = HtmlSanitizer._sanitize_style_string(v)
-                if sanitized_val:
-                    style_parts.append(f"{k}: {sanitized_val}")
-
-            styles = "; ".join(style_parts)
-            if styles:
-                attrs += f' style="{styles}"'
+            # Emit the inline style only when it was NOT promoted to a class.
+            if inline_style and not dedup_class:
+                attrs += f' style="{inline_style}"'
 
             if node.tag == "#text":
                 return content
@@ -177,7 +222,15 @@ class HTMLCompiler:
         else:
             body = render_node(cids.root)
 
-        css = render_css(
+        # Deduplicated style classes first, so responsive @media rules (emitted
+        # later by render_css) override them at equal specificity within a
+        # breakpoint; :hover/:focus rules win via higher specificity regardless.
+        dedup_css = "\n".join(
+            f".{cls} {{ {style} }}"
+            for style, cls in sorted(shared_styles.items(), key=lambda kv: kv[1])
+        )
+        base_css = render_css(
             getattr(cids, "global_styles", []), pseudo_rules, responsive_rules
         )
+        css = "\n".join(part for part in (dedup_css, base_css) if part)
         return body, css
