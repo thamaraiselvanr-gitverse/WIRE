@@ -1,8 +1,10 @@
 import os
+import secrets
 from datetime import datetime, timedelta
 from typing import Any, Dict, Optional
 
 import bcrypt
+import structlog
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
 from jose import JWTError, jwt
@@ -12,9 +14,22 @@ from sqlalchemy.future import select
 from .database import get_db
 from .models import User
 
-SECRET_KEY = os.environ.get(
-    "JWT_SECRET_KEY", "b3a32df1-4c12-4091-a1e9-wireplatform-443b"
-)
+logger = structlog.get_logger(__name__)
+
+# The JWT signing key MUST come from the environment in any real deployment.
+# There is deliberately no shared hardcoded fallback: a committed default key
+# means anyone can forge tokens. When unset we mint a random ephemeral key so
+# local/dev runs still work, but tokens then won't survive a restart or validate
+# across worker processes — the intended nudge to configure it.
+SECRET_KEY = os.environ.get("JWT_SECRET_KEY")
+if not SECRET_KEY:
+    SECRET_KEY = secrets.token_urlsafe(48)
+    logger.warning(
+        "jwt_secret_key_unset",
+        hint="JWT_SECRET_KEY is not set; generated an ephemeral signing key. "
+        "Tokens will not survive restarts or work across processes. "
+        "Set JWT_SECRET_KEY to a strong random value in production.",
+    )
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 * 7  # 7 days
 

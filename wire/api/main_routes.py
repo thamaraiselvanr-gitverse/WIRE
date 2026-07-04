@@ -58,6 +58,17 @@ async def start_reconstruction(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> Dict[str, Any]:
+    # SSRF guard at the trust boundary: reject internal/private/loopback targets
+    # before the engine ever fetches or navigates to the URL.
+    from wire.utils.url_guard import is_public_http_url
+
+    if not is_public_http_url(req.url):
+        raise HTTPException(
+            status_code=400,
+            detail="URL must be a public http(s) address "
+            "(internal/private/loopback targets are not allowed).",
+        )
+
     # Create project record
     project = Project(url=req.url, owner_id=current_user.id, status="running")
     db.add(project)

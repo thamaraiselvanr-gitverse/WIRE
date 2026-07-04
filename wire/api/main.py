@@ -1,4 +1,5 @@
 import contextlib
+import os
 from typing import Any, AsyncGenerator, Dict
 
 from fastapi import FastAPI
@@ -18,9 +19,20 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
 app = FastAPI(title="WIRE Platform API", lifespan=lifespan)
 
+# Allowed browser origins are configurable via WIRE_CORS_ORIGINS (comma-
+# separated) so production hosts can be set without a code change; defaults to
+# the local Vite dev server.
+_cors_origins = [
+    o.strip()
+    for o in os.environ.get(
+        "WIRE_CORS_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173"
+    ).split(",")
+    if o.strip()
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
+    allow_origins=_cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

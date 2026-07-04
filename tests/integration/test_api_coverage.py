@@ -35,6 +35,9 @@ def _stub_pipeline(monkeypatch):
     monkeypatch.setattr(
         "wire.orchestrator.execution_router.ExecutionRouter.execute_pipeline", _fake
     )
+    # Allow the reserved .test domains these tests use past the SSRF guard;
+    # the guard itself is exercised in test_url_guard and the dedicated test below.
+    monkeypatch.setattr("wire.utils.url_guard.is_public_http_url", lambda url: True)
 
 
 def test_run_id_for_url_local_file_fallback():
@@ -162,6 +165,18 @@ def test_login_unknown_user_401(client):
         "/api/auth/login", data={"username": "ghost", "password": "whatever"}
     )
     assert resp.status_code == 401
+
+
+def test_start_reconstruction_rejects_ssrf_url(client, monkeypatch):
+    # Override the autouse allow-all so the real guard verdict reaches the route.
+    monkeypatch.setattr("wire.utils.url_guard.is_public_http_url", lambda url: False)
+    token = _register(client, "ssrf")
+    headers = {"Authorization": f"Bearer {token}"}
+    resp = client.post(
+        "/api/projects", json={"url": "http://169.254.169.254/"}, headers=headers
+    )
+    assert resp.status_code == 400
+    assert "public http" in resp.json()["detail"].lower()
 
 
 @pytest.mark.asyncio
