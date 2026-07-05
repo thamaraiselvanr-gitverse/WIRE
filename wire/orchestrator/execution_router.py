@@ -342,9 +342,20 @@ class ExecutionRouter:
             # the heuristic cascade. Fails open to {} offline / on error.
             await page_obj.set_viewport_size({"width": 1920, "height": 1080})
             computed_style_map = await self.computed_style_capturer.capture(page_obj)
+            # Re-capture at responsive breakpoints; deltas vs desktop become
+            # engine-resolved @media overrides. Restores the desktop viewport.
+            computed_responsive_map = (
+                await self.computed_style_capturer.capture_responsive(
+                    page_obj, computed_style_map
+                )
+            )
             self._save_json(
                 "computed_styles.json",
-                {"url": page_url, "elements_captured": len(computed_style_map)},
+                {
+                    "url": page_url,
+                    "elements_captured": len(computed_style_map),
+                    "responsive_elements_captured": len(computed_responsive_map),
+                },
             )
 
             # ── Phase 4: Network report ──
@@ -513,6 +524,7 @@ class ExecutionRouter:
                 responsive_map=getattr(resolver, "responsive_map", {}),
                 pseudo_map=getattr(resolver, "pseudo_map", {}),
                 computed_style_map=computed_style_map,
+                computed_responsive_map=computed_responsive_map,
             )
             cids = CanonicalDesignSchema(
                 url=page_url,

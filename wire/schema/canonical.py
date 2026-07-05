@@ -118,6 +118,7 @@ class HTMLToCidsParser:
         responsive_map: Optional[Dict[Any, Any]] = None,
         pseudo_map: Optional[Dict[Any, Any]] = None,
         computed_style_map: Optional[Dict[str, Dict[str, str]]] = None,
+        computed_responsive_map: Optional[Dict[str, Dict[str, Dict[str, str]]]] = None,
     ) -> ComponentNode:
         if isinstance(soup_or_html, str):
             soup = BeautifulSoup(soup_or_html, "lxml")
@@ -130,6 +131,7 @@ class HTMLToCidsParser:
         responsive_map = responsive_map or {}
         pseudo_map = pseudo_map or {}
         computed_style_map = computed_style_map or {}
+        computed_responsive_map = computed_responsive_map or {}
         # Prefer the body tag, otherwise root html, otherwise the whole document
         root_element = getattr(soup, "body", None)
         if not root_element:
@@ -144,6 +146,7 @@ class HTMLToCidsParser:
             responsive_map,
             pseudo_map,
             computed_style_map,
+            computed_responsive_map,
         ) or ComponentNode(tag="div")
 
     @staticmethod
@@ -156,6 +159,7 @@ class HTMLToCidsParser:
         responsive_map: Optional[Dict[Any, Any]] = None,
         pseudo_map: Optional[Dict[Any, Any]] = None,
         computed_style_map: Optional[Dict[str, Dict[str, str]]] = None,
+        computed_responsive_map: Optional[Dict[str, Dict[str, Dict[str, str]]]] = None,
     ) -> Optional[ComponentNode]:
         if isinstance(node, Comment):
             return None
@@ -232,19 +236,34 @@ class HTMLToCidsParser:
         interactions_map = interactions_map or {}
         interactions = interactions_map.get(id(node), {})
 
-        # Responsive (@media) styles, filtered to the same allowed property set
-        # already applied to base styles via the sanitizer.
+        # Responsive (@media) styles. Engine-computed breakpoint deltas (keyed by
+        # selector path) are authoritative when present — they reflect what the
+        # browser actually rendered at each width — so they replace the heuristic
+        # @media parse for that element rather than stacking a duplicate block.
+        # Elements with no computed responsive data fall back to the cascade.
         responsive_map = responsive_map or {}
+        computed_responsive_map = computed_responsive_map or {}
         responsive_styles = {}
-        for media_query, props in responsive_map.get(id(node), {}).items():
-            sanitized_props = {}
-            for k, v in props.items():
-                resolved_val = HTMLToCidsParser._resolve_vars(v, effective_scope)
-                sanitized_val = HtmlSanitizer._sanitize_style_string(resolved_val)
-                if sanitized_val:
-                    sanitized_props[k] = sanitized_val
-            if sanitized_props:
-                responsive_styles[media_query] = sanitized_props
+        computed_resp = computed_responsive_map.get(node_path)
+        if computed_resp:
+            for media_query, props in computed_resp.items():
+                sanitized_props = {}
+                for k, v in props.items():
+                    sanitized_val = HtmlSanitizer._sanitize_style_string(v)
+                    if sanitized_val:
+                        sanitized_props[k] = sanitized_val
+                if sanitized_props:
+                    responsive_styles[media_query] = sanitized_props
+        else:
+            for media_query, props in responsive_map.get(id(node), {}).items():
+                sanitized_props = {}
+                for k, v in props.items():
+                    resolved_val = HTMLToCidsParser._resolve_vars(v, effective_scope)
+                    sanitized_val = HtmlSanitizer._sanitize_style_string(resolved_val)
+                    if sanitized_val:
+                        sanitized_props[k] = sanitized_val
+                if sanitized_props:
+                    responsive_styles[media_query] = sanitized_props
 
         # Interaction-state (:hover/:focus/:active) styles from CSS.
         pseudo_map = pseudo_map or {}
@@ -275,6 +294,7 @@ class HTMLToCidsParser:
                     responsive_map,
                     pseudo_map,
                     computed_style_map,
+                    computed_responsive_map,
                 )
                 if child_node:
                     children.append(child_node)

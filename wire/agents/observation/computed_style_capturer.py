@@ -1,4 +1,4 @@
-from typing import Dict, List
+from typing import Dict, List, Optional, Tuple
 
 import structlog
 from playwright.async_api import Page
@@ -127,6 +127,14 @@ class ComputedStyleCapturer:
         "visibility",
     ]
 
+    # Responsive breakpoints to re-capture at, widest → narrowest so the
+    # narrower rule is emitted later and wins where they overlap. Each entry is
+    # ``(media_query, viewport_width)``.
+    DEFAULT_BREAKPOINTS: List[Tuple[str, int]] = [
+        ("@media (max-width: 768px)", 768),
+        ("@media (max-width: 480px)", 480),
+    ]
+
     async def capture(self, page: Page) -> Dict[str, Dict[str, str]]:
         """Return ``{selector_path: {property: computed_value}}`` for the page.
 
@@ -142,6 +150,43 @@ class ComputedStyleCapturer:
         result: Dict[str, Dict[str, str]] = raw or {}
         logger.info("computed_styles_captured", elements=len(result))
         return result
+
+    async def capture_responsive(
+        self,
+        page: Page,
+        base_map: Dict[str, Dict[str, str]],
+        breakpoints: Optional[List[Tuple[str, int]]] = None,
+        base_size: Tuple[int, int] = (1920, 1080),
+    ) -> Dict[str, Dict[str, Dict[str, str]]]:
+        """Capture computed styles at each breakpoint width and return the deltas.
+
+        For every breakpoint the viewport is narrowed and styles are re-captured;
+        only properties whose computed value differs from the desktop ``base_map``
+        become the breakpoint override. Result is
+        ``{selector_path: {media_query: {property: value}}}`` — the engine-
+        resolved counterpart to the cascade's ``@media`` parsing. The viewport is
+        restored to ``base_size`` afterwards so downstream desktop captures are
+        unaffected. Fails open to ``{}``.
+        """
+        breakpoints = breakpoints or self.DEFAULT_BREAKPOINTS
+        responsive: Dict[str, Dict[str, Dict[str, str]]] = {}
+        try:
+            for media_query, width in breakpoints:
+                await page.set_viewport_size({"width": width, "height": 900})
+                bp_map = await self.capture(page)
+                for path, props in bp_map.items():
+                    base = base_map.get(path, {})
+                    delta = {k: v for k, v in props.items() if base.get(k) != v}
+                    if delta:
+                        responsive.setdefault(path, {})[media_query] = delta
+        except Exception as e:  # pragma: no cover - defensive browser guard
+            logger.warning("responsive_computed_capture_failed", error=str(e))
+        finally:
+            await page.set_viewport_size(
+                {"width": base_size[0], "height": base_size[1]}
+            )
+        logger.info("responsive_computed_captured", elements=len(responsive))
+        return responsive
 
 
 # Reads getComputedStyle for each rendered element, keeping only properties
