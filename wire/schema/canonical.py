@@ -85,6 +85,31 @@ class HTMLToCidsParser:
         return val
 
     @staticmethod
+    def node_path(n: Any) -> str:
+        """Build the ``tag:nth-of-type`` selector path for a bs4 node.
+
+        Mirrors the browser-side ``getPath`` used by the shadow piercer and the
+        computed-style capturer so paths key-align across the two worlds: an
+        ``id`` short-circuits to ``#id``; otherwise the path is the chain of
+        ``tag:nth-of-type(n)`` up to (but excluding) ``<html>``.
+        """
+        if not n:
+            return ""
+        if getattr(n, "get", None) and n.get("id"):
+            return f"#{n.get('id')}"
+        path: List[str] = []
+        curr = n
+        while curr and getattr(curr, "name", None) != "[document]":
+            if curr.name == "html":
+                break
+            name = curr.name
+            siblings = curr.find_previous_siblings(name)
+            nth = len(siblings) + 1
+            path.insert(0, f"{name}:nth-of-type({nth})")
+            curr = curr.parent
+        return " > ".join(path)
+
+    @staticmethod
     def parse(
         soup_or_html: Any,
         style_map: Optional[Dict[Any, Any]] = None,
@@ -92,6 +117,7 @@ class HTMLToCidsParser:
         shadow_roots_map: Optional[Dict[Any, Any]] = None,
         responsive_map: Optional[Dict[Any, Any]] = None,
         pseudo_map: Optional[Dict[Any, Any]] = None,
+        computed_style_map: Optional[Dict[str, Dict[str, str]]] = None,
     ) -> ComponentNode:
         if isinstance(soup_or_html, str):
             soup = BeautifulSoup(soup_or_html, "lxml")
@@ -103,6 +129,7 @@ class HTMLToCidsParser:
         shadow_roots_map = shadow_roots_map or {}
         responsive_map = responsive_map or {}
         pseudo_map = pseudo_map or {}
+        computed_style_map = computed_style_map or {}
         # Prefer the body tag, otherwise root html, otherwise the whole document
         root_element = getattr(soup, "body", None)
         if not root_element:
@@ -116,6 +143,7 @@ class HTMLToCidsParser:
             shadow_roots_map,
             responsive_map,
             pseudo_map,
+            computed_style_map,
         ) or ComponentNode(tag="div")
 
     @staticmethod
@@ -127,6 +155,7 @@ class HTMLToCidsParser:
         shadow_roots_map: Optional[Dict[Any, Any]] = None,
         responsive_map: Optional[Dict[Any, Any]] = None,
         pseudo_map: Optional[Dict[Any, Any]] = None,
+        computed_style_map: Optional[Dict[str, Dict[str, str]]] = None,
     ) -> Optional[ComponentNode]:
         if isinstance(node, Comment):
             return None
@@ -169,8 +198,19 @@ class HTMLToCidsParser:
                 else:
                     attributes[k] = str(v)
 
+        computed_style_map = computed_style_map or {}
+        # Selector path (mirrors the browser-side getPath); used both to look up
+        # engine-computed styles and shadow roots.
+        node_path = HTMLToCidsParser.node_path(node)
+
         inherited_styles = inherited_styles or {}
-        explicit_styles = style_map.get(id(node), {})
+        explicit_styles = dict(style_map.get(id(node), {}))
+        # Browser-resolved computed styles are authoritative for base styling:
+        # they already account for specificity, !important, inheritance and
+        # var()/calc(), so they override the heuristic cascade where available.
+        computed_styles = computed_style_map.get(node_path)
+        if computed_styles:
+            explicit_styles.update(computed_styles)
 
         effective_scope = inherited_styles.copy()
         effective_scope.update(explicit_styles)
@@ -219,29 +259,9 @@ class HTMLToCidsParser:
             if sanitized_props:
                 pseudo_styles[pseudo] = sanitized_props
 
-        # Compute selector path to look up shadow DOMs
+        # Selector path (computed above) also keys the shadow-root lookup.
         shadow_roots_map = shadow_roots_map or {}
-
-        # Helper to generate unique path matching Playwright
-        def get_path(n: Any) -> str:
-            if not n:
-                return ""
-            if n.get("id"):
-                return f"#{n.get('id')}"
-            path: List[str] = []
-            curr = n
-            while curr and curr.name != "[document]":
-                if curr.name == "html":
-                    break
-                name = curr.name
-                siblings = curr.find_previous_siblings(name)
-                nth = len(siblings) + 1
-                path.insert(0, f"{name}:nth-of-type({nth})")
-                curr = curr.parent
-            return " > ".join(path)
-
-        path = get_path(node)
-        shadow_root = shadow_roots_map.get(path)
+        shadow_root = shadow_roots_map.get(node_path)
 
         children = []
         if hasattr(node, "children"):
@@ -254,6 +274,7 @@ class HTMLToCidsParser:
                     shadow_roots_map,
                     responsive_map,
                     pseudo_map,
+                    computed_style_map,
                 )
                 if child_node:
                     children.append(child_node)

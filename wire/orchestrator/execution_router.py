@@ -16,6 +16,7 @@ from wire.agents.extraction.legal_detector import LegalDetector
 from wire.agents.extraction.network_monitor import NetworkMonitor
 from wire.agents.observation.auth_handler import AuthHandler
 from wire.agents.observation.browser_session import BrowserSession
+from wire.agents.observation.computed_style_capturer import ComputedStyleCapturer
 from wire.agents.observation.shadow_piercer import ShadowPiercer
 from wire.agents.observation.spa_detector import SPADetector
 from wire.agents.observation.viewport_renderer import ViewportRenderer
@@ -115,6 +116,7 @@ class ExecutionRouter:
 
         # Phase 4 — Full-Spectrum & Knowledge Engine
         self.shadow_piercer = ShadowPiercer()
+        self.computed_style_capturer = ComputedStyleCapturer()
         self.spa_detector = SPADetector()
         self.network_monitor = NetworkMonitor()
         self.comprehensive_extractor = ComprehensiveExtractor()
@@ -334,6 +336,17 @@ class ExecutionRouter:
             shadow_content = await self.shadow_piercer.extract_shadow_content(page_obj)
             self._save_json("shadow_dom.json", shadow_content)
 
+            # ── Accuracy: engine-computed styles ──
+            # Capture getComputedStyle per element at the desktop viewport used
+            # for visual diff, so the CIDS prefers browser-resolved values over
+            # the heuristic cascade. Fails open to {} offline / on error.
+            await page_obj.set_viewport_size({"width": 1920, "height": 1080})
+            computed_style_map = await self.computed_style_capturer.capture(page_obj)
+            self._save_json(
+                "computed_styles.json",
+                {"url": page_url, "elements_captured": len(computed_style_map)},
+            )
+
             # ── Phase 4: Network report ──
             network_report = self.network_monitor.get_report()
             self._save_json("network_report.json", network_report)
@@ -499,6 +512,7 @@ class ExecutionRouter:
                 shadow_roots_map=shadow_roots_map,
                 responsive_map=getattr(resolver, "responsive_map", {}),
                 pseudo_map=getattr(resolver, "pseudo_map", {}),
+                computed_style_map=computed_style_map,
             )
             cids = CanonicalDesignSchema(
                 url=page_url,
@@ -606,29 +620,43 @@ class ExecutionRouter:
             self.knowledge_index.index_design(page_url, design_tokens)
 
             # ── Phase 3: Structural validation ──
+            # The editable CIDS recompilation is the actual product, so it is
+            # what the fidelity score is capped by. The asset-localized clone is
+            # near-identical to the original DOM by construction, so scoring it
+            # would flatter the number; it is kept only as a diagnostic.
             structural_result = self.structural_validator.compare(
-                original_content, rewritten_content
+                original_content, editable_html
             )
             self._save_json("structural_validation.json", structural_result)
             if "structural_score" in structural_result:
                 self.scorer.record_structural_similarity(
                     structural_result["structural_score"], {"url": page_url}
                 )
+            clone_structural = self.structural_validator.compare(
+                original_content, rewritten_content
+            )
+            self._save_json("structural_validation_clone.json", clone_structural)
 
-            # ── Accuracy: Visual fidelity (live original vs. local reconstruction) ──
+            # ── Accuracy: Visual fidelity (live original vs. reconstruction) ──
+            # Screenshot and score the editable product; the clone is captured
+            # too but only as a diagnostic comparison, not as the score cap.
             try:
                 original_screenshot_rel = viewport_results.get("desktop")
-                recon_screenshot_rel = await self._capture_reconstruction_screenshot()
-                if original_screenshot_rel and recon_screenshot_rel:
-                    original_screenshot_path = os.path.join(
-                        self.storage.current_run_dir, original_screenshot_rel
-                    )
-                    recon_screenshot_path = os.path.join(
-                        self.storage.current_run_dir, recon_screenshot_rel
+                editable_screenshot_rel = await self._capture_reconstruction_screenshot(
+                    "output_editable.html", "capture_desktop_editable.png"
+                )
+                original_screenshot_path = (
+                    os.path.join(self.storage.current_run_dir, original_screenshot_rel)
+                    if original_screenshot_rel
+                    else None
+                )
+                if original_screenshot_path and editable_screenshot_rel:
+                    editable_path = os.path.join(
+                        self.storage.current_run_dir, editable_screenshot_rel
                     )
                     visual_result = self.visual_diff.compare_screenshots_normalized(
                         original_screenshot_path,
-                        recon_screenshot_path,
+                        editable_path,
                         ignore_mask=dynamic_mask,
                     )
                     self._save_json("visual_fidelity_report.json", visual_result)
@@ -636,6 +664,18 @@ class ExecutionRouter:
                         self.scorer.record_visual_similarity(
                             visual_result["similarity_percent"], {"url": page_url}
                         )
+                # Diagnostic: pixel fidelity of the high-fidelity clone.
+                clone_screenshot_rel = await self._capture_reconstruction_screenshot()
+                if original_screenshot_path and clone_screenshot_rel:
+                    clone_path = os.path.join(
+                        self.storage.current_run_dir, clone_screenshot_rel
+                    )
+                    clone_visual = self.visual_diff.compare_screenshots_normalized(
+                        original_screenshot_path,
+                        clone_path,
+                        ignore_mask=dynamic_mask,
+                    )
+                    self._save_json("visual_fidelity_clone_report.json", clone_visual)
             except Exception as visual_err:
                 logger.warning(
                     "visual_fidelity_check_failed", url=page_url, error=str(visual_err)
@@ -655,17 +695,22 @@ class ExecutionRouter:
 
         return result
 
-    async def _capture_reconstruction_screenshot(self) -> Optional[str]:
+    async def _capture_reconstruction_screenshot(
+        self,
+        source: str = "index.html",
+        out_name: str = "capture_desktop_reconstruction.png",
+    ) -> Optional[str]:
         """
-        Renders the locally saved reconstruction (index.html, with localized
-        assets) at the desktop viewport and screenshots it, so it can be
-        pixel-diffed against the live original's desktop capture.
+        Renders a locally saved reconstruction file (``index.html`` clone or
+        ``output_editable.html`` product) at the desktop viewport and
+        screenshots it, so it can be pixel-diffed against the live original's
+        desktop capture. Returns the run-relative screenshot path or None.
         """
-        index_path = os.path.join(self.storage.current_run_dir, "index.html")
-        if not os.path.exists(index_path):
+        source_path = os.path.join(self.storage.current_run_dir, source)
+        if not os.path.exists(source_path):
             return None
 
-        file_url = "file://" + os.path.abspath(index_path).replace(os.sep, "/")
+        file_url = "file://" + os.path.abspath(source_path).replace(os.sep, "/")
         recon_page = await self.browser.context.new_page()  # type: ignore[union-attr]
         try:
             await recon_page.set_viewport_size({"width": 1920, "height": 1080})
@@ -673,11 +718,10 @@ class ExecutionRouter:
             await recon_page.wait_for_timeout(500)
             screenshot = await recon_page.screenshot(full_page=True)
 
-            filename = "capture_desktop_reconstruction.png"
-            screenshot_path = os.path.join(self.storage.get_asset_path(), filename)
+            screenshot_path = os.path.join(self.storage.get_asset_path(), out_name)
             with open(screenshot_path, "wb") as f:
                 f.write(screenshot)
-            return f"assets/{filename}"
+            return f"assets/{out_name}"
         finally:
             await recon_page.close()
 
