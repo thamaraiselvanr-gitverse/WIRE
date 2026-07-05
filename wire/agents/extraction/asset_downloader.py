@@ -12,17 +12,26 @@ from wire.utils.url_guard import is_disallowed_subresource
 logger = structlog.get_logger(__name__)
 
 URL_REGEX = re.compile(r"url\(\s*['\"]?(.*?)['\"]?\s*\)")
+# @import url("x.css") | @import 'x.css', with optional media/layer conditions.
+IMPORT_REGEX = re.compile(
+    r"""@import\s+(?:url\(\s*['\"]?(?P<u>[^'\")]+)['\"]?\s*\)"""
+    r"""|['\"](?P<s>[^'\"]+)['\"])(?P<cond>[^;]*);""",
+    re.IGNORECASE,
+)
 
 
 class AssetDownloader:
     def __init__(self) -> None:
         self.client = httpx.AsyncClient()
+        # Guards against @import cycles within a single download_assets run.
+        self._seen_css_imports: set[str] = set()
 
     async def download_assets(
         self, page_url: str, html_content: str, asset_dir: str
     ) -> tuple[str, list[str]]:
         soup = BeautifulSoup(html_content, "html.parser")
         downloaded_assets: List[str] = []
+        self._seen_css_imports = set()
 
         async def fetch_and_save(
             orig_url: str, asset_type: str, source_url: Optional[str] = None
@@ -213,6 +222,67 @@ class AssetDownloader:
 
         return str(soup), downloaded_assets
 
+    async def _process_css_imports(
+        self,
+        css_text: str,
+        source_url: str,
+        asset_dir: str,
+        downloaded_assets: List[Any],
+    ) -> str:
+        """Fetch, recursively localize, and rewrite ``@import`` statements.
+
+        Each imported stylesheet is downloaded as CSS (not an opaque blob),
+        run back through ``_process_css_urls`` so its own ``url()`` refs and
+        nested imports are localized too, then saved and the ``@import``
+        rewritten to the local copy. Bare-string imports (``@import "x.css"``)
+        are handled as well as ``@import url(...)``. Import cycles are guarded.
+        """
+        imports = list(IMPORT_REGEX.finditer(css_text))
+        if not imports:
+            return css_text
+
+        for match in imports:
+            href = match.group("u") or match.group("s")
+            if not href or href.startswith("data:"):
+                continue
+            try:
+                full_url = urllib.parse.urljoin(source_url, href)
+                if is_disallowed_subresource(full_url):
+                    logger.warning("css_import_ssrf_blocked", url=full_url)
+                    continue
+                if full_url in self._seen_css_imports:
+                    continue
+                self._seen_css_imports.add(full_url)
+
+                response = await self.client.get(full_url, follow_redirects=True)
+                if response.status_code != 200:
+                    continue
+
+                nested_css = await self._process_css_urls(
+                    response.text, full_url, asset_dir, downloaded_assets
+                )
+
+                filename = os.path.basename(urllib.parse.urlparse(full_url).path)
+                if not filename.endswith(".css"):
+                    filename = (filename or "import") + ".css"
+                safe_name = f"{hash(full_url)}_{filename}"
+                with open(os.path.join(asset_dir, safe_name), "wb") as f:
+                    f.write(nested_css.encode("utf-8"))
+                downloaded_assets.append(os.path.join(asset_dir, safe_name))
+
+                # A CSS file lives inside assets/ alongside its imports; the
+                # HTML/inline case needs the assets/ prefix.
+                local_ref = (
+                    safe_name if source_url.endswith(".css") else f"assets/{safe_name}"
+                )
+                cond = match.group("cond").strip()
+                replacement = f'@import "{local_ref}"{" " + cond if cond else ""};'
+                css_text = css_text.replace(match.group(0), replacement)
+            except Exception as e:
+                logger.warning("css_import_failed", url=href, error=str(e))
+
+        return css_text
+
     async def _process_css_urls(
         self,
         css_text: str,
@@ -220,6 +290,12 @@ class AssetDownloader:
         asset_dir: str,
         downloaded_assets: List[Any],
     ) -> str:
+        # Resolve @import chains first so imported sheets are localized as CSS
+        # rather than downloaded as opaque blobs by the url() pass below.
+        css_text = await self._process_css_imports(
+            css_text, source_url, asset_dir, downloaded_assets
+        )
+
         # Find all url(...)
         matches = URL_REGEX.findall(css_text)
         if not matches:
