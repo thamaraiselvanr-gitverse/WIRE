@@ -10,10 +10,63 @@ from PIL import Image
 logger = structlog.get_logger(__name__)
 
 
+def _uniform_mean(a: np.ndarray, w: int) -> np.ndarray:
+    """Mean over a ``w``x``w`` window ('same' size, edge-padded) via an integral
+    image, so SSIM stays O(pixels) and low-memory even on tall screenshots."""
+    pad = w // 2
+    ap = np.pad(a, ((pad, pad), (pad, pad)), mode="edge")
+    integ = np.cumsum(np.cumsum(ap, axis=0), axis=1)
+    integ = np.pad(integ, ((1, 0), (1, 0)), mode="constant")
+    h, wd = a.shape
+    s = (
+        integ[w : w + h, w : w + wd]
+        - integ[0:h, w : w + wd]
+        - integ[w : w + h, 0:wd]
+        + integ[0:h, 0:wd]
+    )
+    return s / float(w * w)  # type: ignore[no-any-return]
+
+
 class VisualDiff:
     """
     Perceptual hashing and pixel-level diff between original and reconstruction.
     """
+
+    # SSIM window; images are downscaled to this long side first so the score
+    # reflects perceived structure rather than sub-pixel/anti-aliasing noise.
+    SSIM_WINDOW = 7
+    SSIM_MAX_SIDE = 512
+
+    @classmethod
+    def compute_ssim(cls, image_a: "Image.Image", image_b: "Image.Image") -> float:
+        """Structural similarity (Wang et al.) of two images, as a 0-100 percent.
+
+        SSIM tracks perceived structure — luminance, contrast and local
+        correlation — so it is far less punishing than exact per-pixel color
+        delta for anti-aliased text and sub-pixel shifts, while still dropping
+        hard when layout genuinely diverges. Both images are downscaled to a
+        common bounded size and compared in grayscale.
+        """
+        w = cls.SSIM_WINDOW
+        max_side = cls.SSIM_MAX_SIDE
+        base = image_a.convert("L")
+        scale = min(1.0, max_side / max(base.width, base.height))
+        size = (max(w, int(base.width * scale)), max(w, int(base.height * scale)))
+        arr_a = np.asarray(base.resize(size), dtype=np.float64)
+        arr_b = np.asarray(image_b.convert("L").resize(size), dtype=np.float64)
+
+        c1 = (0.01 * 255.0) ** 2
+        c2 = (0.03 * 255.0) ** 2
+        mu_a = _uniform_mean(arr_a, w)
+        mu_b = _uniform_mean(arr_b, w)
+        mu_a2, mu_b2, mu_ab = mu_a * mu_a, mu_b * mu_b, mu_a * mu_b
+        var_a = _uniform_mean(arr_a * arr_a, w) - mu_a2
+        var_b = _uniform_mean(arr_b * arr_b, w) - mu_b2
+        cov_ab = _uniform_mean(arr_a * arr_b, w) - mu_ab
+        ssim_map = ((2 * mu_ab + c1) * (2 * cov_ab + c2)) / (
+            (mu_a2 + mu_b2 + c1) * (var_a + var_b + c2)
+        )
+        return round(max(0.0, float(ssim_map.mean())) * 100.0, 2)
 
     @staticmethod
     def file_hash(filepath: str) -> str:
@@ -203,13 +256,23 @@ class VisualDiff:
         recon_hash = self.perceptual_hash(recon_bytes)
         distance = self.hamming_distance(orig_hash, recon_hash)
 
-        # Merge results, ensuring similarity_percent is the pixel-based one
+        # Perceptual structural similarity (SSIM) — the score-capping metric.
+        try:
+            with Image.open(original_path) as ia, Image.open(reconstruction_path) as ib:
+                ssim_percent = self.compute_ssim(ia, ib)
+        except Exception as e:  # pragma: no cover - defensive image guard
+            logger.warning("ssim_computation_failed", error=str(e))
+            ssim_percent = pixel_result.get("similarity_percent", 0.0)
+
+        # Merge results. ``similarity_percent`` stays the pixel metric for
+        # backward compatibility; ``ssim_percent`` is the perceptual score.
         result = {
             "original_sha256": self.file_hash(original_path),
             "reconstruction_sha256": self.file_hash(reconstruction_path),
             "original_phash": orig_hash,
             "reconstruction_phash": recon_hash,
             "hamming_distance": distance,
+            "ssim_percent": ssim_percent,
             **pixel_result,
         }
 

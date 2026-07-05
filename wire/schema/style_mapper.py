@@ -10,10 +10,11 @@ logger = structlog.get_logger(__name__)
 
 class CascadeResolver:
     def __init__(self) -> None:
-        # Covers layout (box model, flex, grid), visual effects (shadow, filter,
-        # opacity, transform/transition/animation), and typography/overflow
-        # properties needed for accurate visual reconstruction. Custom properties
-        # (--*) are always allowed regardless of this set (see below).
+        # Reference set of the core visual properties. The gate is now a
+        # *denylist* (see ``denied_props`` and ``_accept_prop``): any property
+        # is kept unless it is explicitly non-visual/behavioral, so newly-shipped
+        # or vendor-prefixed paint properties no longer regress fidelity by being
+        # silently dropped. This set is retained for documentation/reference.
         self.allowed_props = {
             "color",
             "background-color",
@@ -129,6 +130,26 @@ class CascadeResolver:
             "visibility",
         }
 
+        # Non-visual / behavioral / reconstruction-hostile properties dropped
+        # regardless. Everything else (including custom --* props) is kept.
+        self.denied_props = {
+            "behavior",
+            "-moz-binding",
+            "will-change",
+            "pointer-events",
+            "user-select",
+            "-webkit-user-select",
+            "-webkit-tap-highlight-color",
+            "-webkit-touch-callout",
+            "touch-action",
+            "scroll-behavior",
+            "content",
+        }
+
+    def _accept_prop(self, prop: str) -> bool:
+        """Keep any property that is not explicitly denied (denylist gate)."""
+        return prop.startswith("--") or prop not in self.denied_props
+
     def _calculate_specificity(
         self, selector: str, source_order: int
     ) -> Tuple[Any, ...]:
@@ -156,7 +177,7 @@ class CascadeResolver:
         for decl in decls:
             if getattr(decl, "type", None) == "declaration":
                 prop = decl.lower_name
-                if prop in self.allowed_props or prop.startswith("--"):
+                if self._accept_prop(prop):
                     valid.append((prop, tinycss2.serialize(decl.value).strip()))
         return valid
 
@@ -209,7 +230,7 @@ class CascadeResolver:
                 for decl in decls:
                     if getattr(decl, "type", None) == "declaration":
                         prop = decl.lower_name
-                        if prop in self.allowed_props or prop.startswith("--"):
+                        if self._accept_prop(prop):
                             valid_decls.append(
                                 (prop, tinycss2.serialize(decl.value).strip())
                             )
@@ -338,7 +359,7 @@ class CascadeResolver:
             for decl in inline_decls:
                 if getattr(decl, "type", None) == "declaration":
                     prop = decl.lower_name
-                    if prop in self.allowed_props or prop.startswith("--"):
+                    if self._accept_prop(prop):
                         val = tinycss2.serialize(decl.value).strip()
                         element_specificity_map[el_id][prop] = ((1, 0, 0, 0, 0), val)
 

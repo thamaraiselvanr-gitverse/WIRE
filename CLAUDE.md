@@ -85,12 +85,23 @@ is set, so the pipeline runs offline. Live-LLM tests skip without a key.
 ## Known state / gaps (verified, not aspirational)
 
 - **Fidelity scoring is now real** (as of the accuracy-features branch):
-  `FidelityScorer` records pixel-visual + structural similarity and caps the
-  score by what was measured. Previously it always returned ~100% regardless of
-  output quality — do not reintroduce that decoupling.
-- **`CascadeResolver.allowed_props`** is an allowlist; anything not listed is
-  dropped from the CIDS/editable path. It now covers grid/flex/transform/
-  transition/animation/shadow/etc. Add properties here when fidelity regresses.
+  `FidelityScorer` records perceptual (SSIM) visual + structural similarity and
+  caps the score by what was measured. The visual/structural checks score the
+  **editable** output (`output_editable.html`, the actual product), not the
+  asset-localized clone (kept only as a `*_clone` diagnostic). The visual score
+  cap is **SSIM** (`ssim_percent`); raw pixel `similarity_percent` is retained
+  as a diagnostic. Previously it always returned ~100% regardless of output
+  quality — do not reintroduce that decoupling.
+- **Style capture is browser-first**: `ComputedStyleCapturer` reads
+  `getComputedStyle` per element into the CIDS (keyed by the parser's
+  `node_path`), and the parser prefers those engine-resolved values over the
+  heuristic `CascadeResolver`, falling back to it when absent. url()-bearing
+  props are excluded from computed capture (they resolve to absolute URLs) and
+  come from the localized cascade instead.
+- **`CascadeResolver` now gates via a denylist** (`denied_props` +
+  `_accept_prop`): every property is kept except explicitly non-visual/
+  behavioral ones. `allowed_props` remains only as a reference set. Add to
+  `denied_props` (not the allowlist) if a non-visual property leaks in.
 - `Crawler` does real same-domain BFS only when `single_page=False`
   (opt-in via `ExecutionRouter.enable_multi_page_crawl`, default off).
 - Still thin/stubbed: `stealth.py`, `auth_handler.py`, `orchestrator/scheduler.py`

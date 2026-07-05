@@ -660,9 +660,14 @@ class ExecutionRouter:
                         ignore_mask=dynamic_mask,
                     )
                     self._save_json("visual_fidelity_report.json", visual_result)
-                    if "similarity_percent" in visual_result:
+                    # Prefer SSIM (perceptual/structural) over raw pixel delta as
+                    # the score cap; fall back to pixel similarity if unavailable.
+                    visual_score = visual_result.get(
+                        "ssim_percent", visual_result.get("similarity_percent")
+                    )
+                    if visual_score is not None:
                         self.scorer.record_visual_similarity(
-                            visual_result["similarity_percent"], {"url": page_url}
+                            visual_score, {"url": page_url}
                         )
                 # Diagnostic: pixel fidelity of the high-fidelity clone.
                 clone_screenshot_rel = await self._capture_reconstruction_screenshot()
