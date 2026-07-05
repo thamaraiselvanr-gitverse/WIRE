@@ -38,7 +38,12 @@ class VisualDiff:
     SSIM_MAX_SIDE = 512
 
     @classmethod
-    def compute_ssim(cls, image_a: "Image.Image", image_b: "Image.Image") -> float:
+    def compute_ssim(
+        cls,
+        image_a: "Image.Image",
+        image_b: "Image.Image",
+        ignore_mask: Optional[np.ndarray] = None,
+    ) -> float:
         """Structural similarity (Wang et al.) of two images, as a 0-100 percent.
 
         SSIM tracks perceived structure — luminance, contrast and local
@@ -46,6 +51,10 @@ class VisualDiff:
         delta for anti-aliased text and sub-pixel shifts, while still dropping
         hard when layout genuinely diverges. Both images are downscaled to a
         common bounded size and compared in grayscale.
+
+        ``ignore_mask`` (a boolean array at ``image_a``'s resolution, True =
+        volatile) excludes dynamic regions — ads, carousels, animations — from
+        the score, mirroring the pixel metric so both use the same mask.
         """
         w = cls.SSIM_WINDOW
         max_side = cls.SSIM_MAX_SIDE
@@ -66,6 +75,15 @@ class VisualDiff:
         ssim_map = ((2 * mu_ab + c1) * (2 * cov_ab + c2)) / (
             (mu_a2 + mu_b2 + c1) * (var_a + var_b + c2)
         )
+
+        # Restrict the mean to non-volatile pixels when a matching mask exists.
+        if ignore_mask is not None and ignore_mask.shape == (base.height, base.width):
+            mask_img = Image.fromarray((ignore_mask.astype("uint8") * 255)).resize(
+                size, Image.Resampling.NEAREST
+            )
+            considered = np.asarray(mask_img) <= 127
+            if considered.any():
+                return round(max(0.0, float(ssim_map[considered].mean())) * 100.0, 2)
         return round(max(0.0, float(ssim_map.mean())) * 100.0, 2)
 
     @staticmethod
@@ -259,7 +277,7 @@ class VisualDiff:
         # Perceptual structural similarity (SSIM) — the score-capping metric.
         try:
             with Image.open(original_path) as ia, Image.open(reconstruction_path) as ib:
-                ssim_percent = self.compute_ssim(ia, ib)
+                ssim_percent = self.compute_ssim(ia, ib, ignore_mask=ignore_mask)
         except Exception as e:  # pragma: no cover - defensive image guard
             logger.warning("ssim_computation_failed", error=str(e))
             ssim_percent = pixel_result.get("similarity_percent", 0.0)

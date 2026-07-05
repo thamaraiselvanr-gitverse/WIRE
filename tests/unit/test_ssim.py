@@ -1,5 +1,6 @@
 """SSIM perceptual metric and its exposure through compare_screenshots."""
 
+import numpy as np
 from PIL import Image
 
 from wire.validation.visual_diff import VisualDiff
@@ -25,6 +26,23 @@ def test_ssim_tolerates_dimension_mismatch():
     b = _solid((100, 60), (50, 50, 50))
     # Same content, different size -> resized internally, still high similarity.
     assert VisualDiff.compute_ssim(a, b) > 90.0
+
+
+def test_ssim_ignore_mask_excludes_volatile_region():
+    # Top half of B differs (a "volatile" banner); bottom half identical to A.
+    a = np.full((100, 100, 3), 128, dtype=np.uint8)
+    b = a.copy()
+    b[0:50, :, :] = 255
+    img_a = Image.fromarray(a)
+    img_b = Image.fromarray(b)
+
+    without = VisualDiff.compute_ssim(img_a, img_b)
+    mask = np.zeros((100, 100), dtype=bool)
+    mask[0:50, :] = True  # mark the differing region volatile
+    with_mask = VisualDiff.compute_ssim(img_a, img_b, ignore_mask=mask)
+
+    assert with_mask > without
+    assert with_mask > 85.0
 
 
 def test_compare_screenshots_exposes_ssim(tmp_path):
