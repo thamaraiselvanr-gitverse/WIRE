@@ -119,6 +119,134 @@ def test_disclosure_without_matching_target_left_alone():
     assert out.children[0].tag == "button"
 
 
+def test_aria_tabs_become_target_anchors():
+    root = _n(
+        "div",
+        attrs={"class": "tabs"},
+        children=[
+            _n(
+                "div",
+                attrs={"role": "tablist"},
+                children=[
+                    _n(
+                        "button",
+                        text="One",
+                        attrs={"role": "tab", "aria-controls": "p1"},
+                    ),
+                    _n(
+                        "button",
+                        text="Two",
+                        attrs={"role": "tab", "aria-controls": "p2"},
+                    ),
+                ],
+            ),
+            _n("div", attrs={"role": "tabpanel", "id": "p1"}, text="Panel one"),
+            _n("div", attrs={"role": "tabpanel", "id": "p2"}, text="Panel two"),
+        ],
+    )
+    out, report = InteractivityTransformer().transform(root)
+
+    assert any(r.kind == "tabs" for r in report.restored)
+    assert "wire-tabgroup" in out.attributes["class"]
+    tablist = out.children[0]
+    # Tabs are now in-page anchors pointing at their panels.
+    assert tablist.children[0].tag == "a"
+    assert tablist.children[0].attributes["href"] == "#p1"
+    assert tablist.children[1].attributes["href"] == "#p2"
+    # Panels carry the switching class; the first is the default.
+    assert "wire-tabpanel" in out.children[1].attributes["class"]
+    assert "wire-tabpanel-first" in out.children[1].attributes["class"]
+    css = "\n".join(report.injected_styles)
+    assert ":target" in css and ":has(:target)" in css
+
+
+def test_single_tab_is_not_transformed():
+    root = _n(
+        "div",
+        children=[
+            _n(
+                "div",
+                attrs={"role": "tablist"},
+                children=[
+                    _n(
+                        "button",
+                        text="Only",
+                        attrs={"role": "tab", "aria-controls": "p1"},
+                    )
+                ],
+            ),
+            _n("div", attrs={"role": "tabpanel", "id": "p1"}, text="Solo"),
+        ],
+    )
+    _out, report = InteractivityTransformer().transform(root)
+    assert not any(r.kind == "tabs" for r in report.restored)
+
+
+def test_carousel_becomes_scroll_snap_track():
+    root = _n(
+        "div",
+        attrs={"class": "carousel"},
+        children=[
+            _n("div", attrs={"class": "slide"}, text="A"),
+            _n("div", attrs={"class": "slide"}, text="B"),
+            _n("div", attrs={"class": "slide"}, text="C"),
+        ],
+    )
+    out, report = InteractivityTransformer().transform(root)
+    assert any(r.kind == "carousel" for r in report.restored)
+    assert "wire-carousel-1" in out.attributes["class"]
+    css = "\n".join(report.injected_styles)
+    assert "scroll-snap-type:x mandatory" in css
+    assert "scroll-snap-align:start" in css
+
+
+def test_carousel_applies_to_inner_track_when_present():
+    root = _n(
+        "div",
+        attrs={"class": "swiper"},
+        children=[
+            _n(
+                "div",
+                attrs={"class": "swiper-wrapper"},
+                children=[
+                    _n("div", text="A"),
+                    _n("div", text="B"),
+                ],
+            )
+        ],
+    )
+    out, _ = InteractivityTransformer().transform(root)
+    # The scroll-snap class lands on the inner wrapper (the real slide track).
+    assert "wire-carousel-1" in out.children[0].attributes["class"]
+    assert "wire-carousel" not in out.attributes.get("class", "")
+
+
+def test_carousel_track_not_double_transformed():
+    # Container transforms its inner track; revisiting the track must NOT
+    # re-trigger on the injected "wire-carousel-" class (substring "carousel").
+    root = _n(
+        "div",
+        attrs={"class": "carousel"},
+        children=[
+            _n(
+                "div",
+                attrs={"class": "slides"},
+                children=[_n("div", text="A"), _n("div", text="B")],
+            ),
+            _n("div", text="C"),
+        ],
+    )
+    _out, report = InteractivityTransformer().transform(root)
+    assert sum(1 for r in report.restored if r.kind == "carousel") == 1
+
+
+def test_carousel_needs_class_and_multiple_children():
+    # A plain 2-child div (no carousel class) is left alone.
+    root = _n("div", children=[_n("div", text="A"), _n("div", text="B")])
+    _out, report = InteractivityTransformer().transform(root)
+    assert not any(r.kind == "carousel" for r in report.restored)
+
+
 def test_restored_components_render_valid_html():
     root = _n(
         "div",

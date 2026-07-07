@@ -11,6 +11,10 @@ natively:
   ``:focus-within`` via an injected scoped rule (no DOM surgery).
 * **ARIA disclosure** (``aria-expanded`` + ``aria-controls``) → native
   ``<details>/<summary>``, which is zero-JS and accessible.
+* **ARIA tabs** (``role=tablist/tab/tabpanel``) → tabs become in-page anchors
+  and panels switch via ``:target`` (with ``:has()`` giving a default panel).
+* **Carousel / slider** (class-signalled) → a CSS scroll-snap track the user
+  can swipe/scroll through (manual navigation; autoplay stays out of scope).
 
 It runs on a copy of the CIDS to produce a separate ``output_interactive.html``
 artifact, so the pixel-scored ``output_editable.html`` is never altered.
@@ -30,7 +34,7 @@ logger = structlog.get_logger(__name__)
 class RestoredComponent(BaseModel):
     """One interactive component re-expressed declaratively."""
 
-    kind: str  # "dropdown" | "disclosure"
+    kind: str  # "dropdown" | "disclosure" | "tabs" | "carousel"
     detail: str = ""
 
 
@@ -52,6 +56,29 @@ class InteractivityTransformer:
         "has-dropdown",
     )
     _SUBMENU_CLASS_HINTS = ("submenu", "sub-menu", "dropdown-menu", "dropdown-content")
+    _CAROUSEL_CLASS_HINTS = (
+        "carousel",
+        "slider",
+        "swiper",
+        "slideshow",
+        "glide",
+        "splide",
+        "slick",
+    )
+    _TRACK_CLASS_HINTS = (
+        "track",
+        "wrapper",
+        "slides",
+        "swiper-wrapper",
+        "glide__track",
+    )
+    # CSS-only tab switching: panels hidden, the URL-targeted panel shown, and
+    # the first panel shown while none in its group is targeted (needs :has()).
+    _TABS_CSS = (
+        ".wire-tabpanel{display:none;}\n"
+        ".wire-tabpanel:target{display:block;}\n"
+        ".wire-tabgroup:not(:has(:target)) .wire-tabpanel-first{display:block;}"
+    )
 
     def transform(
         self, root: ComponentNode
@@ -60,6 +87,7 @@ class InteractivityTransformer:
         mutated = copy.deepcopy(root)
         report = InteractivityReport()
         self._counter = 0
+        self._tabs_css_added = False
         self._walk(mutated, report)
         logger.info(
             "interactivity_transformed",
@@ -76,6 +104,8 @@ class InteractivityTransformer:
         self._restore_disclosures(node, report)
         if self._is_dropdown_parent(node):
             self._restore_dropdown(node, report)
+        self._restore_tabs(node, report)
+        self._restore_carousel(node, report)
         for child in node.children:
             self._walk(child, report)
 
@@ -171,7 +201,92 @@ class InteractivityTransformer:
             tag="details", attributes=details_attrs, children=[summary, panel]
         )
 
+    # ── ARIA tabs -> :target / :has() CSS switching ──────────────────────────
+    def _restore_tabs(self, group: ComponentNode, report: InteractivityReport) -> None:
+        tablist = next(
+            (c for c in group.children if c.attributes.get("role") == "tablist"),
+            None,
+        )
+        if tablist is None:
+            return
+        tabs = [
+            n for n in self._descendants(tablist) if n.attributes.get("role") == "tab"
+        ]
+        panels_by_id = {
+            n.attributes["id"]: n
+            for n in self._descendants(group)
+            if n.attributes.get("id") and n.attributes.get("role") == "tabpanel"
+        }
+        linked = [
+            (tab, panels_by_id[tab.attributes["aria-controls"]])
+            for tab in tabs
+            if tab.attributes.get("aria-controls") in panels_by_id
+        ]
+        if len(linked) < 2:
+            return
+
+        self._add_class(group, "wire-tabgroup")
+        for i, (tab, panel) in enumerate(linked):
+            # A tab becomes an in-page anchor so :target selects its panel.
+            tab.tag = "a"
+            tab.attributes["href"] = f"#{panel.attributes['id']}"
+            self._add_class(panel, "wire-tabpanel")
+            if i == 0:
+                self._add_class(panel, "wire-tabpanel-first")
+        if not self._tabs_css_added:
+            report.injected_styles.append(self._TABS_CSS)
+            self._tabs_css_added = True
+        report.restored.append(
+            RestoredComponent(kind="tabs", detail=f"{len(linked)} panels")
+        )
+
+    # ── carousel -> CSS scroll-snap track ────────────────────────────────────
+    def _is_carousel(self, node: ComponentNode) -> bool:
+        cls = node.attributes.get("class", "").lower()
+        if "wire-carousel-" in cls:
+            return False  # already transformed; don't re-detect our own marker
+        return (
+            any(h in cls for h in self._CAROUSEL_CLASS_HINTS)
+            and len(node.children) >= 2
+        )
+
+    def _restore_carousel(
+        self, node: ComponentNode, report: InteractivityReport
+    ) -> None:
+        if not self._is_carousel(node):
+            return
+        # Apply to the inner track when present (swiper/glide/splide), else the
+        # container itself — the element that directly holds the slides.
+        track = next(
+            (
+                c
+                for c in node.children
+                if any(
+                    h in c.attributes.get("class", "").lower()
+                    for h in self._TRACK_CLASS_HINTS
+                )
+                and len(c.children) >= 2
+            ),
+            node,
+        )
+        self._counter += 1
+        cls = f"wire-carousel-{self._counter}"
+        self._add_class(track, cls)
+        report.injected_styles.append(
+            f".{cls}{{display:flex;overflow-x:auto;scroll-snap-type:x mandatory;"
+            f"-webkit-overflow-scrolling:touch;}}\n"
+            f".{cls}>*{{flex:0 0 100%;scroll-snap-align:start;}}"
+        )
+        report.restored.append(RestoredComponent(kind="carousel", detail=f".{cls}"))
+
     # ── helpers ──────────────────────────────────────────────────────────────
+    def _descendants(self, node: ComponentNode) -> List[ComponentNode]:
+        out: List[ComponentNode] = []
+        for child in node.children:
+            out.append(child)
+            out.extend(self._descendants(child))
+        return out
+
     @staticmethod
     def _add_class(node: ComponentNode, cls: str) -> None:
         existing: Optional[str] = node.attributes.get("class")

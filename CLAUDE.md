@@ -128,11 +128,13 @@ is set, so the pipeline runs offline. Live-LLM tests skip without a key.
 - **Interactivity is partially restored** by `layout/interactivity_transformer.py`
   (`InteractivityTransformer`): it detects JS-driven dropdowns (class-signalled
   nested submenus → hidden + `:hover`/`:focus-within` reveal via injected CSS)
-  and ARIA disclosures (`aria-expanded`+`aria-controls` → native
-  `<details>/<summary>`), emitting a **separate** `output_interactive.html`
+  ARIA disclosures (`aria-expanded`+`aria-controls` → native
+  `<details>/<summary>`), ARIA tabs (`role=tablist/tab/tabpanel` → `:target`
+  anchors + `:has()` default panel), and class-signalled carousels (→ CSS
+  scroll-snap track), emitting a **separate** `output_interactive.html`
   (+ `interactivity_report.json`). It never touches the pixel-scored
-  `output_editable.html`, so fidelity isn't affected. Tabs/carousels are not yet
-  restored.
+  `output_editable.html`, so fidelity isn't affected. Carousel autoplay stays
+  out of scope (manual swipe/scroll only).
 - `html_compiler` flattens styles to inline `style=""` and drops `<style>`/JS —
   inline styles can't express `:hover`/`@media`/animation, so the editable path
   has a lower fidelity ceiling than the raw clone by design.
