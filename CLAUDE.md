@@ -112,8 +112,14 @@ is set, so the pipeline runs offline. Live-LLM tests skip without a key.
 - **Repurposing success is measured** by `evaluation/repurpose_harness.py`
   (`ExecutionRouter.evaluate_repurpose`): it applies a content payload to the
   CIDS, recompiles `substituted_editable.html`, and scores slot-fill + content-
-  presence + structural integrity (composite in `repurpose_report.json`).
-  Honesty guard: nothing repurposed → success 0, never a vacuous 100.
+  presence + structural integrity + **layout safety** (composite in
+  `repurpose_report.json`). Honesty guard: nothing repurposed → success 0,
+  never a vacuous 100.
+- **Content fit is checked** by `evaluation/layout_safety.py`
+  (`ContentFitValidator`): substituted content that overflows its slot (text
+  ≫ original or over the slot's `max_length`), leaves a required slot empty, or
+  changes an image's aspect ratio is flagged as a risk and lowers the repurpose
+  score — so "your content without breaking it" is measured, not assumed.
 - `Crawler` does real same-domain BFS only when `single_page=False`
   (opt-in via `ExecutionRouter.enable_multi_page_crawl`, default off).
 - Still thin/stubbed: `stealth.py`, `auth_handler.py`, `orchestrator/scheduler.py`

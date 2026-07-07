@@ -52,6 +52,8 @@ class SubstitutionMapper:
                             dominant_color=getattr(
                                 submitted_val, "dominant_color", None
                             ),
+                            width=getattr(submitted_val, "width", None),
+                            height=getattr(submitted_val, "height", None),
                             structure=getattr(
                                 submitted_val, "extracted_structure", None
                             ),
@@ -111,6 +113,8 @@ class SubstitutionMapper:
                                         dominant_color=getattr(
                                             val, "dominant_color", None
                                         ),
+                                        width=getattr(val, "width", None),
+                                        height=getattr(val, "height", None),
                                         structure=getattr(
                                             val, "extracted_structure", None
                                         ),

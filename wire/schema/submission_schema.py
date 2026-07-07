@@ -106,6 +106,10 @@ class SubstitutedValueRef(BaseModel):
     # can set accessible alt text and theme the slot to the image.
     alt_text: Optional[str] = None
     dominant_color: Optional[str] = None
+    # Intrinsic pixel dimensions of an uploaded image, used by the layout-safety
+    # check to flag aspect-ratio shifts that would distort the slot.
+    width: Optional[int] = None
+    height: Optional[int] = None
     # Structured fields (title/summary/headings/...) from an uploaded document.
     structure: Optional[Dict[str, Any]] = None
 

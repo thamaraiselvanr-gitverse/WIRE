@@ -27,6 +27,7 @@ import structlog
 from pydantic import BaseModel, Field
 
 from wire.compilers.html_compiler import HTMLCompiler
+from wire.evaluation.layout_safety import ContentFitRisk, ContentFitValidator
 from wire.generation.substitution_mapper import SubstitutionMapper
 from wire.layout.section_removal_planner import SectionRemovalPlanner
 from wire.schema.canonical import CanonicalDesignSchema, ComponentNode
@@ -60,6 +61,8 @@ class RepurposeReport(BaseModel):
     content_presence_rate: float
     structural_score: Optional[float] = None
     visual_score: Optional[float] = None
+    layout_safety_score: Optional[float] = None
+    layout_risks: List[ContentFitRisk] = Field(default_factory=list)
     success_percent: float
     fields: List[FieldOutcome] = Field(default_factory=list)
 
@@ -199,6 +202,16 @@ class RepurposeEvaluator:
             getattr(form_schema, "repeatable_groups", [])
         )
 
+        # Layout safety: does the submitted content actually FIT its slot, or
+        # does it overflow / distort / leave a hole? (Phase-2 content-fit check.)
+        fields_by_slot: dict[str, object] = {}
+        for f in getattr(form_schema, "fields", []):
+            fields_by_slot[f.slot_id] = f
+        for group in getattr(form_schema, "repeatable_groups", []):
+            for f in getattr(group, "template_fields", []):
+                fields_by_slot[f.slot_id] = f
+        safety = ContentFitValidator().check(cids.root, substitutions, fields_by_slot)
+
         # Honesty guard: if nothing was actually repurposed (no user fields, or
         # none landed in a slot), success is 0 — a structurally-intact page that
         # accepted none of the user's content has not been repurposed. Only when
@@ -209,7 +222,11 @@ class RepurposeEvaluator:
             # presence over text subs; if all applied subs were media, presence
             # is not penalized (there was no text to verify).
             eff_presence = presence_rate if text_applied else 1.0
-            components = [slot_fill_rate * 100.0, eff_presence * 100.0]
+            components = [
+                slot_fill_rate * 100.0,
+                eff_presence * 100.0,
+                safety.safety_score,
+            ]
             if structural_score is not None:
                 components.append(structural_score)
             if visual_score is not None:
@@ -224,6 +241,8 @@ class RepurposeEvaluator:
             content_presence_rate=round(presence_rate, 4),
             structural_score=structural_score,
             visual_score=visual_score,
+            layout_safety_score=safety.safety_score,
+            layout_risks=safety.risks,
             success_percent=success,
             fields=outcomes,
         )
@@ -235,6 +254,7 @@ class RepurposeEvaluator:
             slot_fill=report.slot_fill_rate,
             presence=report.content_presence_rate,
             structural=structural_score,
+            layout_safety=safety.safety_score,
         )
         return report, substituted_html
 
