@@ -1,4 +1,6 @@
+import asyncio
 import os
+import random
 import re
 import urllib.parse
 from typing import Any, List, Optional
@@ -30,10 +32,58 @@ def _is_unfetchable(url: str) -> bool:
 
 
 class AssetDownloader:
+    # Transient failures worth retrying: rate limiting and server errors.
+    RETRY_STATUSES = frozenset({429, 500, 502, 503, 504})
+    MAX_RETRIES = 3
+    BACKOFF_BASE = 0.5  # seconds; grows as BACKOFF_BASE * 2**attempt
+    MAX_BACKOFF = 8.0
+
     def __init__(self) -> None:
         self.client = httpx.AsyncClient()
         # Guards against @import cycles within a single download_assets run.
         self._seen_css_imports: set[str] = set()
+
+    async def _fetch(self, url: str) -> Optional[httpx.Response]:
+        """GET with retry + exponential backoff for transient failures.
+
+        Retries network errors and rate-limit/server-error statuses
+        (429/5xx), honoring a numeric ``Retry-After`` header when present, with
+        jittered exponential backoff. Permanent responses (2xx, 404, 403, …) are
+        returned immediately for the caller to handle; ``None`` means every
+        attempt raised.
+        """
+        response: Optional[httpx.Response] = None
+        for attempt in range(self.MAX_RETRIES + 1):
+            try:
+                response = await self.client.get(url, follow_redirects=True)
+            except Exception as e:
+                response = None
+                if attempt == self.MAX_RETRIES:
+                    logger.warning("asset_fetch_error", url=url, error=str(e))
+            else:
+                if response.status_code not in self.RETRY_STATUSES:
+                    return response
+                if attempt == self.MAX_RETRIES:
+                    logger.warning(
+                        "asset_fetch_giving_up",
+                        url=url,
+                        status=response.status_code,
+                    )
+            if attempt < self.MAX_RETRIES:
+                await asyncio.sleep(self._retry_delay(attempt, response))
+        return response
+
+    def _retry_delay(self, attempt: int, response: Optional[httpx.Response]) -> float:
+        """Backoff before the next attempt: a numeric ``Retry-After`` wins,
+        else jittered exponential backoff capped at ``MAX_BACKOFF``."""
+        if response is not None:
+            retry_after = response.headers.get("Retry-After", "")
+            try:
+                return float(min(float(retry_after), self.MAX_BACKOFF))
+            except ValueError:
+                pass  # HTTP-date form isn't parsed; fall back to backoff.
+        delay: float = min(self.BACKOFF_BASE * (2**attempt), self.MAX_BACKOFF)
+        return delay + random.uniform(0, delay * 0.25)
 
     async def download_assets(
         self, page_url: str, html_content: str, asset_dir: str
@@ -106,8 +156,8 @@ class AssetDownloader:
             local_path = os.path.join(asset_dir, safe_name)
 
             try:
-                response = await self.client.get(full_url, follow_redirects=True)
-                if response.status_code == 200:
+                response = await self._fetch(full_url)
+                if response is not None and response.status_code == 200:
                     content_to_save = response.content
 
                     # If it's a CSS file, parse it for nested urls
@@ -301,8 +351,8 @@ class AssetDownloader:
                     continue
                 self._seen_css_imports.add(full_url)
 
-                response = await self.client.get(full_url, follow_redirects=True)
-                if response.status_code != 200:
+                response = await self._fetch(full_url)
+                if response is None or response.status_code != 200:
                     continue
 
                 nested_css = await self._process_css_urls(
@@ -389,8 +439,8 @@ class AssetDownloader:
                 safe_name = f"{hash(full_url)}_{filename}"
                 local_path = os.path.join(asset_dir, safe_name)
 
-                response = await self.client.get(full_url, follow_redirects=True)
-                if response.status_code == 200:
+                response = await self._fetch(full_url)
+                if response is not None and response.status_code == 200:
                     with open(local_path, "wb") as f:
                         f.write(response.content)
                     downloaded_assets.append(local_path)
