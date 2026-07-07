@@ -125,6 +125,14 @@ is set, so the pipeline runs offline. Live-LLM tests skip without a key.
 - Still thin/stubbed: `stealth.py`, `auth_handler.py`, `orchestrator/scheduler.py`
   & `coordinator.py` (single-node simulation), Phase 5 "consensus" (re-renders
   the same URL 3×) and `region_probe` (no real geo egress configured).
+- **Interactivity is partially restored** by `layout/interactivity_transformer.py`
+  (`InteractivityTransformer`): it detects JS-driven dropdowns (class-signalled
+  nested submenus → hidden + `:hover`/`:focus-within` reveal via injected CSS)
+  and ARIA disclosures (`aria-expanded`+`aria-controls` → native
+  `<details>/<summary>`), emitting a **separate** `output_interactive.html`
+  (+ `interactivity_report.json`). It never touches the pixel-scored
+  `output_editable.html`, so fidelity isn't affected. Tabs/carousels are not yet
+  restored.
 - `html_compiler` flattens styles to inline `style=""` and drops `<style>`/JS —
   inline styles can't express `:hover`/`@media`/animation, so the editable path
   has a lower fidelity ceiling than the raw clone by design.

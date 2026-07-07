@@ -32,6 +32,7 @@ from wire.generation.substitution_mapper import SubstitutionMapper
 from wire.generation.transformation_prompt_generator import (
     TransformationPromptGenerator,
 )
+from wire.layout.interactivity_transformer import InteractivityTransformer
 from wire.layout.layout_reflow_engine import LayoutReflowEngine
 from wire.layout.section_removal_planner import SectionRemovalPlanner
 from wire.layout.structural_integrity_validator import StructuralIntegrityValidator
@@ -148,6 +149,7 @@ class ExecutionRouter:
         self._intent_reconciler = IntentReconciler(self._llm_guard)
         self._portfolio_profile = PortfolioProfile()
         self._slot_discoverer = HeuristicSlotDiscoverer()
+        self.interactivity_transformer = InteractivityTransformer()
 
         # Phase 8 — Layout Adaptation Engine
         self._removal_planner = SectionRemovalPlanner()
@@ -602,6 +604,29 @@ class ExecutionRouter:
                 encoding="utf-8",
             ) as f:
                 f.write(editable_html)
+
+            # ── Phase 3 accuracy: declarative interactivity ──
+            # Restore JS-driven dropdowns/disclosures as CSS/HTML in a SEPARATE
+            # artifact, so the pixel-scored editable output is never altered.
+            interactive_root, interactivity = self.interactivity_transformer.transform(
+                cids.root
+            )
+            interactive_cids = CanonicalDesignSchema(
+                url=cids.url,
+                tokens=cids.tokens,
+                root=interactive_root,
+                global_styles=list(cids.global_styles) + interactivity.injected_styles,
+            )
+            interactive_html = self.html_compiler.compile_document(
+                interactive_cids, title=extraction_report.get("title") or None
+            )
+            with open(
+                os.path.join(self.storage.current_run_dir, "output_interactive.html"),
+                "w",
+                encoding="utf-8",
+            ) as f:
+                f.write(interactive_html)
+            self._save_json("interactivity_report.json", interactivity.model_dump())
 
             # ── Phase 5: Framework adapter compilation ──
             react_output = self.react_adapter.compile(cids)
