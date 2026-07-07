@@ -23,6 +23,7 @@ from wire.agents.observation.viewport_renderer import ViewportRenderer
 from wire.compilers.html_compiler import HTMLCompiler
 from wire.compilers.react_adapter import ReactAdapter
 from wire.compilers.vue_adapter import VueAdapter
+from wire.evaluation.repurpose_harness import RepurposeEvaluator, RepurposeReport
 from wire.generation.document_ingestion import DocumentIngestionPipeline
 from wire.generation.image_ingestion import ImageIngestionPipeline
 from wire.generation.media_ingestion import MediaIngestionPipeline
@@ -1070,6 +1071,68 @@ class ExecutionRouter:
             validation_report=validation_report,
             transformation_prompt=prompt,
         )
+
+    def evaluate_repurpose(
+        self, run_id: str, payload: SubmissionPayload
+    ) -> RepurposeReport:
+        """Phase-0: actually apply a content payload to a stored run and score it.
+
+        Loads the run's CIDS + form schema, applies the substitutions, recompiles
+        the repurposed page to ``substituted_editable.html``, and writes an honest
+        ``repurpose_report.json`` (slot fill, content presence, structural
+        integrity vs. the original editable output). This is the measurement that
+        tells us whether the *product* — repurposing a layout with your own
+        content — actually works, independent of reconstruction fidelity.
+        """
+        logger.info("evaluate_repurpose_started", run_id=run_id)
+        run_dir = os.path.join(self.storage.base_dir, run_id)
+        cids_path = os.path.join(run_dir, "schema_cids.json")
+        if not os.path.exists(cids_path):
+            raise ValueError(f"CIDS schema not found: {cids_path}")
+
+        form_schema_path = os.path.join(run_dir, "website_form_schema.json")
+        if not os.path.exists(form_schema_path):
+            form_schema_path = os.path.join(run_dir, "portfolio_form_schema.json")
+            if not os.path.exists(form_schema_path):
+                raise ValueError("No form schema found in run directory.")
+
+        with open(cids_path, "r", encoding="utf-8") as f:
+            cids = CanonicalDesignSchema.model_validate(json.load(f))
+
+        from wire.schema.portfolio_schema import PortfolioFormSchema
+        from wire.schema.semantic_schema import WebsiteFormSchema
+
+        with open(form_schema_path, "r", encoding="utf-8") as f:
+            form_schema_data = json.load(f)
+        form_schema: Any = (
+            PortfolioFormSchema.model_validate(form_schema_data)
+            if "portfolio_form_schema" in form_schema_path
+            else WebsiteFormSchema.model_validate(form_schema_data)
+        )
+
+        original_html: Optional[str] = None
+        original_path = os.path.join(run_dir, "output_editable.html")
+        if os.path.exists(original_path):
+            with open(original_path, "r", encoding="utf-8") as f:
+                original_html = f.read()
+
+        report, substituted_html = RepurposeEvaluator().evaluate(
+            cids, form_schema, payload, original_html=original_html
+        )
+        with open(
+            os.path.join(run_dir, "substituted_editable.html"), "w", encoding="utf-8"
+        ) as f:
+            f.write(substituted_html)
+        with open(
+            os.path.join(run_dir, "repurpose_report.json"), "w", encoding="utf-8"
+        ) as f:
+            f.write(report.model_dump_json(indent=2))
+        logger.info(
+            "evaluate_repurpose_completed",
+            run_id=run_id,
+            success_percent=report.success_percent,
+        )
+        return report
 
     @staticmethod
     def _ingest_submitted_value(val: Any, assets_dir: str) -> None:
