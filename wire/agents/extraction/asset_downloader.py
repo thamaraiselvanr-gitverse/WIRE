@@ -20,6 +20,15 @@ IMPORT_REGEX = re.compile(
 )
 
 
+_UNFETCHABLE_SCHEMES = ("javascript:", "mailto:", "tel:", "about:", "blob:")
+
+
+def _is_unfetchable(url: str) -> bool:
+    """URLs that must never be fetched: in-page fragments and non-HTTP schemes."""
+    u = url.strip().lower()
+    return u.startswith("#") or u.startswith(_UNFETCHABLE_SCHEMES)
+
+
 class AssetDownloader:
     def __init__(self) -> None:
         self.client = httpx.AsyncClient()
@@ -33,13 +42,22 @@ class AssetDownloader:
         downloaded_assets: List[str] = []
         self._seen_css_imports = set()
 
+        # A <base href> retargets every relative URL on the page; resolve
+        # against it instead of the document URL when present.
+        base_tag = soup.find("base", href=True)
+        base_url = (
+            urllib.parse.urljoin(page_url, str(base_tag["href"]))
+            if base_tag
+            else page_url
+        )
+
         async def fetch_and_save(
             orig_url: str, asset_type: str, source_url: Optional[str] = None
         ) -> str:
-            if orig_url.startswith("data:"):
+            if orig_url.startswith("data:") or _is_unfetchable(orig_url):
                 return orig_url
 
-            base_reference_url = source_url if source_url else page_url
+            base_reference_url = source_url if source_url else base_url
             full_url = urllib.parse.urljoin(base_reference_url, orig_url)
 
             # Sub-resource SSRF guard: a (possibly attacker-controlled) page must
@@ -208,16 +226,45 @@ class AssetDownloader:
             if rels & icon_rels:
                 tag["href"] = await fetch_and_save(str(tag["href"]), "icon")
 
+        # 3f. Social-preview images referenced from <meta content="...">
+        # (og:image, twitter:image, msapplication tile, schema.org image).
+        meta_image_keys = {
+            "og:image",
+            "og:image:url",
+            "og:image:secure_url",
+            "twitter:image",
+            "twitter:image:src",
+            "msapplication-tileimage",
+            "image",
+        }
+        for tag in soup.find_all("meta", content=True):
+            key = str(
+                tag.get("property") or tag.get("name") or tag.get("itemprop") or ""
+            ).lower()
+            if key in meta_image_keys:
+                tag["content"] = await fetch_and_save(str(tag["content"]), "img")
+
+        # 3g. SVG sprite references: <use href="sprite.svg#icon"> pulls a symbol
+        # from an external file that must be localized (the #fragment is kept).
+        for tag in soup.find_all("use"):
+            ref_raw = tag.get("href") or tag.get("xlink:href")
+            ref = str(ref_raw) if ref_raw else ""
+            if ref and "#" in ref and not ref.startswith("#"):
+                file_part, frag = ref.split("#", 1)
+                local = await fetch_and_save(file_part, "img")
+                attr = "href" if tag.get("href") else "xlink:href"
+                tag[attr] = f"{local}#{frag}"
+
         # 4. Inline <style> tags
         for tag in soup.find_all("style"):
             if tag.string:
-                new_css = await process_css_text(str(tag.string), page_url)
+                new_css = await process_css_text(str(tag.string), base_url)
                 tag.string.replace_with(new_css)  # type: ignore[attr-defined]
 
         # 5. Inline style= attributes
         for tag in soup.find_all(style=True):
             if tag.get("style"):
-                new_style = await process_css_text(str(tag["style"]), page_url)
+                new_style = await process_css_text(str(tag["style"]), base_url)
                 tag["style"] = new_style
 
         return str(soup), downloaded_assets
@@ -303,8 +350,9 @@ class AssetDownloader:
 
         unique_urls = list(set(matches))
         for old_url in unique_urls:
-            # Avoid processing data URIs
-            if old_url.startswith("data:"):
+            # Skip data URIs, in-page SVG fragment refs (url(#filter)), and
+            # non-fetchable schemes — fetching those would 404 or error.
+            if old_url.startswith("data:") or _is_unfetchable(old_url):
                 continue
 
             # Use fetch_and_save indirectly. Note: The return of fetch_and_save is `assets/name`
