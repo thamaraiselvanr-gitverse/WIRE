@@ -118,9 +118,11 @@ class FormSchemaCompiler:
             # Resolve field type from slot's type
             field_type = self._resolve_field_type(slot)
 
-            # Run placeholder detection on original value
+            # Run placeholder detection on original value. Parsed element text
+            # lives in a #text child, not node.text_content, so fall back to it
+            # — otherwise headings/paragraphs surface as blank current content.
             original_value = (
-                node.text_content
+                self._node_text(node)
                 or node.attributes.get("src", "")
                 or node.attributes.get("href", "")
             )
@@ -160,6 +162,16 @@ class FormSchemaCompiler:
             )
 
         return fields
+
+    @staticmethod
+    def _node_text(node: ComponentNode) -> str:
+        """The node's own text: its ``text_content`` or first ``#text`` child."""
+        if node.text_content:
+            return node.text_content
+        for child in node.children:
+            if child.tag == "#text" and child.text_content:
+                return child.text_content
+        return ""
 
     def _find_parent_section(
         self, node_path: str, section_map: Dict[str, ClassifiedSection]
@@ -212,6 +224,28 @@ class FormSchemaCompiler:
         Uses deterministic templates for unambiguous combinations,
         falls back to cleaned-up slot_id.
         """
+        # Heuristic slot_ids embed the element kind (slot_{tag}_{n}); use it so
+        # a hero's heading, body, and button don't all read "Hero Title".
+        parts = slot_id.split("_")
+        if len(parts) >= 3 and parts[0] == "slot":
+            kind_map = {
+                "h1": "Heading", "h2": "Heading", "h3": "Subheading",
+                "h4": "Subheading", "h5": "Subheading", "h6": "Subheading",
+                "p": "Text", "span": "Text", "a": "Link", "button": "Button",
+                "li": "List Item", "img": "Image", "blockquote": "Quote",
+                "figcaption": "Caption", "caption": "Caption", "label": "Label",
+                "td": "Cell", "th": "Header Cell", "summary": "Summary",
+                "cite": "Citation", "strong": "Text", "em": "Text",
+            }  # fmt: skip
+            kind = kind_map.get(parts[1])
+            if kind:
+                role_name = (
+                    section_role.value.replace("_", " ").title()
+                    if section_role != SectionRole.UNKNOWN
+                    else ""
+                )
+                return f"{role_name} {kind}".strip()
+
         # Deterministic templates for known combinations
         templates = {
             (SectionRole.HERO, "text"): "Hero Title",

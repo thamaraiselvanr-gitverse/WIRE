@@ -45,7 +45,7 @@ from wire.schema.canonical import (
     DesignTokens,
     HTMLToCidsParser,
 )
-from wire.schema.input_blueprint import DataSlot, InputBlueprint, SlotConstraint
+from wire.schema.input_blueprint import InputBlueprint
 from wire.schema.layout_schema import (
     IntegrityReport,
     IntegrityViolation,
@@ -68,6 +68,7 @@ from wire.semantic.llm_guard import LLMGuard
 from wire.semantic.placeholder_detector import PlaceholderDetector
 from wire.semantic.profiles.portfolio_profile import PortfolioProfile
 from wire.semantic.section_classifier import SectionClassifier
+from wire.semantic.slot_discovery import HeuristicSlotDiscoverer
 from wire.storage.local import LocalStorage
 from wire.storage.template_repo import TemplateRepository
 from wire.synthesis.knowledge_index import KnowledgeIndex
@@ -146,6 +147,7 @@ class ExecutionRouter:
         self._form_compiler = FormSchemaCompiler(self._placeholder_detector)
         self._intent_reconciler = IntentReconciler(self._llm_guard)
         self._portfolio_profile = PortfolioProfile()
+        self._slot_discoverer = HeuristicSlotDiscoverer()
 
         # Phase 8 — Layout Adaptation Engine
         self._removal_planner = SectionRemovalPlanner()
@@ -571,15 +573,12 @@ class ExecutionRouter:
             if text_val := getattr(real_root, "text_content", None):
                 if "Compiled DOM" in text_val:
                     raise ValueError("Mocked 'Compiled DOM' text found in CIDS root.")
-            blueprint = InputBlueprint(
-                slots={
-                    "slot_title": DataSlot(
-                        id="slot_title",
-                        type="text",
-                        constraint=SlotConstraint(allowed_types=["text"]),
-                    )
-                }
-            )
+            # Heuristic slot discovery: bind slot_ids onto replaceable content
+            # nodes (leaf text, images) and build a real InputBlueprint, so the
+            # form schema exposes editable fields without an LLM. Mutates the
+            # CIDS in place, so the slot bindings persist in schema_cids.json and
+            # flow to content substitution.
+            blueprint = self._slot_discoverer.discover(real_root)
             with open(
                 os.path.join(self.storage.current_run_dir, "schema_cids.json"),
                 "w",

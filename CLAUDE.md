@@ -102,6 +102,18 @@ is set, so the pipeline runs offline. Live-LLM tests skip without a key.
   `_accept_prop`): every property is kept except explicitly non-visual/
   behavioral ones. `allowed_props` remains only as a reference set. Add to
   `denied_props` (not the allowlist) if a non-visual property leaks in.
+- **Repurposing works without an LLM now**: `HeuristicSlotDiscoverer`
+  (`semantic/slot_discovery.py`) binds `slot_id`s onto replaceable content
+  nodes (leaf text, images) and builds the `InputBlueprint`, so the form schema
+  exposes real editable fields offline (previously `total_fields` was always 0 —
+  nothing was slot-bound). It mutates the CIDS in place, so the bindings persist
+  in `schema_cids.json` and drive substitution. The LLM refines these when
+  present; it is no longer required for the product to function.
+- **Repurposing success is measured** by `evaluation/repurpose_harness.py`
+  (`ExecutionRouter.evaluate_repurpose`): it applies a content payload to the
+  CIDS, recompiles `substituted_editable.html`, and scores slot-fill + content-
+  presence + structural integrity (composite in `repurpose_report.json`).
+  Honesty guard: nothing repurposed → success 0, never a vacuous 100.
 - `Crawler` does real same-domain BFS only when `single_page=False`
   (opt-in via `ExecutionRouter.enable_multi_page_crawl`, default off).
 - Still thin/stubbed: `stealth.py`, `auth_handler.py`, `orchestrator/scheduler.py`
