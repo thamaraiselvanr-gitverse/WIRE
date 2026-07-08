@@ -21,7 +21,9 @@ async def _handler(request: httpx.Request) -> httpx.Response:
             headers={"content-type": "text/css"},
         )
     if url.endswith((".woff2", ".png", ".jpg")):
-        return httpx.Response(200, content=_PNG)
+        # Distinct bytes per URL: content-hash dedup would otherwise collapse
+        # the font and images into a single local file.
+        return httpx.Response(200, content=_PNG + url.encode())
     if url.endswith("missing.js"):
         return httpx.Response(404)
     return httpx.Response(404)

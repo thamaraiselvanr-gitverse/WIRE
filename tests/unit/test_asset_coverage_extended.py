@@ -18,13 +18,20 @@ _PNG = b"\x89PNG\r\n\x1a\n"
 
 async def _handler(request: httpx.Request) -> httpx.Response:
     url = str(request.url)
+    # Distinct bytes per URL: content-hash dedup collapses identical payloads
+    # into one file, and these fixtures represent *different* assets.
+    body_suffix = url.encode()
     if url.endswith(
         (".png", ".jpg", ".jpeg", ".webp", ".avif", ".ico", ".gif", ".svg")
     ):
-        return httpx.Response(200, content=_PNG, headers={"content-type": "image/png"})
+        return httpx.Response(
+            200, content=_PNG + body_suffix, headers={"content-type": "image/png"}
+        )
     if url.endswith((".mp4", ".webm", ".mp3", ".ogg", ".vtt")):
         return httpx.Response(
-            200, content=b"\x00\x00", headers={"content-type": "video/mp4"}
+            200,
+            content=b"\x00\x00" + body_suffix,
+            headers={"content-type": "video/mp4"},
         )
     if url.endswith(".webmanifest"):
         return httpx.Response(200, text="{}", headers={"content-type": "text/plain"})

@@ -36,8 +36,12 @@ async def _asset_handler(request: httpx.Request) -> httpx.Response:
             headers={"content-type": "application/javascript"},
         )
     if url.endswith(".png"):
+        # Distinct bytes per URL so content-hash dedup treats bg.png and
+        # pic.png as the different assets they are.
         return httpx.Response(
-            200, content=b"\x89PNG\r\n\x1a\n", headers={"content-type": "image/png"}
+            200,
+            content=b"\x89PNG\r\n\x1a\n" + url.encode(),
+            headers={"content-type": "image/png"},
         )
     return httpx.Response(404)
 

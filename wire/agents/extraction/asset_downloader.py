@@ -1,9 +1,10 @@
 import asyncio
+import hashlib
 import os
 import random
 import re
 import urllib.parse
-from typing import Any, List, Optional
+from typing import Any, Dict, List, Optional
 
 import httpx
 import structlog
@@ -42,6 +43,10 @@ class AssetDownloader:
         self.client = httpx.AsyncClient()
         # Guards against @import cycles within a single download_assets run.
         self._seen_css_imports: set[str] = set()
+        # Per-run dedup caches: the same URL is fetched once, and identical
+        # bytes served from *different* URLs map to one local file.
+        self._url_to_local: Dict[str, str] = {}
+        self._content_hash_to_local: Dict[str, str] = {}
 
     async def _fetch(self, url: str) -> Optional[httpx.Response]:
         """GET with retry + exponential backoff for transient failures.
@@ -91,6 +96,8 @@ class AssetDownloader:
         soup = BeautifulSoup(html_content, "html.parser")
         downloaded_assets: List[str] = []
         self._seen_css_imports = set()
+        self._url_to_local = {}
+        self._content_hash_to_local = {}
 
         # A <base href> retargets every relative URL on the page; resolve
         # against it instead of the document URL when present.
@@ -115,6 +122,11 @@ class AssetDownloader:
             if is_disallowed_subresource(full_url):
                 logger.warning("asset_ssrf_blocked", url=full_url)
                 return orig_url
+
+            # The same URL referenced repeatedly (logos, repeated icons) is
+            # fetched exactly once per run.
+            if full_url in self._url_to_local:
+                return self._url_to_local[full_url]
 
             parsed_url = urllib.parse.urlparse(full_url)
             filename = os.path.basename(parsed_url.path) or "index"
@@ -159,9 +171,20 @@ class AssetDownloader:
                 response = await self._fetch(full_url)
                 if response is not None and response.status_code == 200:
                     content_to_save = response.content
+                    is_css = asset_type == "link" and filename.endswith(".css")
+                    digest = hashlib.sha256(content_to_save).hexdigest()
+
+                    # Identical bytes served from a different URL (CDN mirrors,
+                    # duplicated uploads) reuse the already-saved file. CSS is
+                    # exempt: its rewritten url()s depend on the source URL.
+                    if not is_css:
+                        dup = self._content_hash_to_local.get(digest)
+                        if dup is not None:
+                            self._url_to_local[full_url] = dup
+                            return dup
 
                     # If it's a CSS file, parse it for nested urls
-                    if asset_type == "link" and filename.endswith(".css"):
+                    if is_css:
                         css_text = response.text
                         css_text = await self._process_css_urls(
                             css_text, full_url, asset_dir, downloaded_assets
@@ -173,7 +196,11 @@ class AssetDownloader:
                     downloaded_assets.append(local_path)
 
                     # If this was called from inside a CSS file, the path relative to index.html is 'assets/...'
-                    return f"assets/{safe_name}"
+                    local_ref = f"assets/{safe_name}"
+                    self._url_to_local[full_url] = local_ref
+                    if not is_css:
+                        self._content_hash_to_local[digest] = local_ref
+                    return local_ref
             except Exception as e:
                 logger.warning("asset_download_failed", url=full_url, error=str(e))
 
@@ -317,7 +344,44 @@ class AssetDownloader:
                 new_style = await process_css_text(str(tag["style"]), base_url)
                 tag["style"] = new_style
 
+        # The clone is always written to disk as UTF-8; a stale declared
+        # charset (e.g. iso-8859-1) would make browsers mis-decode it.
+        self._normalize_charset(soup)
+
         return str(soup), downloaded_assets
+
+    @staticmethod
+    def _normalize_charset(soup: BeautifulSoup) -> None:
+        """Align the document's declared charset with the UTF-8 file we save.
+
+        Rewrites ``<meta charset>`` and ``<meta http-equiv="Content-Type">``
+        declarations to UTF-8, and inserts a ``<meta charset="utf-8">`` when a
+        ``<head>`` exists but no declaration does (non-ASCII text would
+        otherwise be at the mercy of browser sniffing for local files).
+        """
+        declared = False
+        for meta in soup.find_all("meta"):
+            if meta.get("charset"):
+                meta["charset"] = "utf-8"
+                declared = True
+            elif str(meta.get("http-equiv") or "").lower() == "content-type":
+                content = str(meta.get("content") or "")
+                new_content = re.sub(
+                    r"charset\s*=\s*[^;\s]+",
+                    "charset=utf-8",
+                    content,
+                    flags=re.IGNORECASE,
+                )
+                if new_content == content and "charset" not in content.lower():
+                    new_content = (content.rstrip("; ") + "; charset=utf-8").lstrip(
+                        "; "
+                    )
+                meta["content"] = new_content
+                declared = True
+        if not declared and soup.head is not None:
+            tag = soup.new_tag("meta")
+            tag["charset"] = "utf-8"
+            soup.head.insert(0, tag)
 
     async def _process_css_imports(
         self,
@@ -419,6 +483,17 @@ class AssetDownloader:
                 if is_disallowed_subresource(full_url):
                     logger.warning("css_asset_ssrf_blocked", url=full_url)
                     continue
+
+                # Already downloaded this run (from HTML or another sheet):
+                # rewrite to the existing local file without refetching.
+                cached = self._url_to_local.get(full_url)
+                if cached is not None:
+                    name = cached.split("/")[-1]
+                    css_text = css_text.replace(
+                        old_url, name if source_url.endswith(".css") else cached
+                    )
+                    continue
+
                 parsed_url = urllib.parse.urlparse(full_url)
                 filename = os.path.basename(parsed_url.path) or "index"
                 if not filename.endswith(
@@ -441,9 +516,22 @@ class AssetDownloader:
 
                 response = await self._fetch(full_url)
                 if response is not None and response.status_code == 200:
+                    # Identical bytes under a different URL: reuse the copy.
+                    digest = hashlib.sha256(response.content).hexdigest()
+                    dup = self._content_hash_to_local.get(digest)
+                    if dup is not None:
+                        self._url_to_local[full_url] = dup
+                        name = dup.split("/")[-1]
+                        css_text = css_text.replace(
+                            old_url, name if source_url.endswith(".css") else dup
+                        )
+                        continue
+
                     with open(local_path, "wb") as f:
                         f.write(response.content)
                     downloaded_assets.append(local_path)
+                    self._url_to_local[full_url] = f"assets/{safe_name}"
+                    self._content_hash_to_local[digest] = f"assets/{safe_name}"
 
                     # Determine replacement:
                     # If this source_url is a CSS file inside `assets/`, we just need the filename.

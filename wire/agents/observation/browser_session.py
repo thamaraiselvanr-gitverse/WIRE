@@ -75,6 +75,33 @@ class BrowserSession:
                 logger.warning("dom_stability_check_failed", error=str(e))
             await page.wait_for_timeout(check_interval_ms)
 
+    async def trigger_lazy_content(
+        self, page: Page, step_px: int = 800, max_steps: int = 40
+    ) -> None:
+        """Scroll through the full page height to fire lazy loaders.
+
+        IntersectionObserver-based lazy images, infinite-scroll sections, and
+        scroll-triggered animations only materialize once their viewport is
+        reached. Scrolling in steps (rather than jumping to the bottom) gives
+        each observer a chance to fire; we then return to the top so the
+        capture reflects the page's natural initial scroll position.
+        """
+        try:
+            height = await page.evaluate("() => document.body.scrollHeight")
+            steps = min(max_steps, max(1, int(height // step_px) + 1))
+            for i in range(1, steps + 1):
+                await page.evaluate(f"() => window.scrollTo(0, {i * step_px})")
+                await page.wait_for_timeout(120)
+            # Settle at the bottom so final-viewport observers fire too.
+            await page.evaluate("() => window.scrollTo(0, document.body.scrollHeight)")
+            await page.wait_for_timeout(250)
+            await page.evaluate("() => window.scrollTo(0, 0)")
+            await page.wait_for_timeout(150)
+            logger.info("lazy_content_triggered", scroll_height=height, steps=steps)
+        except Exception as e:
+            # Scrolling is best-effort; capture proceeds either way.
+            logger.warning("lazy_scroll_failed", error=str(e))
+
     async def capture_page(self, url: str) -> str:
         if not self._is_active:
             raise RuntimeError("Browser session not started")
@@ -95,6 +122,10 @@ class BrowserSession:
             if spa_result.get("is_spa"):
                 logger.info("spa_detected_waiting_for_hydration")
                 await self.wait_for_dom_stability(page)
+
+            # Fire IntersectionObserver-based lazy loading (images, infinite
+            # scroll, scroll-reveal sections) before snapshotting the DOM.
+            await self.trigger_lazy_content(page)
 
             # Normalize modals and stuck DOM state before capture
             await page.evaluate("""
