@@ -97,7 +97,20 @@ is set, so the pipeline runs offline. Live-LLM tests skip without a key.
   `node_path`), and the parser prefers those engine-resolved values over the
   heuristic `CascadeResolver`, falling back to it when absent. url()-bearing
   props are excluded from computed capture (they resolve to absolute URLs) and
-  come from the localized cascade instead.
+  come from the localized cascade instead. Dark-mode styles are captured too
+  (`capture_color_scheme` emulates `prefers-color-scheme: dark`) and merge into
+  the same responsive-delta map as `@media (prefers-color-scheme: dark)`.
+- **Capture fires lazy content first**: `BrowserSession.trigger_lazy_content`
+  scrolls the full page height (capped steps, returns to top) before
+  `page.content()`, so IntersectionObserver-based lazy images and scroll-reveal
+  sections are materialized in the snapshot.
+- **`AssetDownloader` dedups and normalizes**: per-run URL cache (each URL
+  fetched once) + sha256 content-hash dedup (identical bytes from different
+  URLs → one local file; CSS/manifests exempt since their rewritten refs are
+  source-relative). Declared charsets are normalized to UTF-8 (the clone is
+  written as UTF-8). PWA manifest icons/screenshots and
+  `preload`/`prefetch`/`modulepreload` link hrefs are localized; DOCTYPE is
+  preserved (never invented for quirks-mode pages).
 - **`CascadeResolver` now gates via a denylist** (`denied_props` +
   `_accept_prop`): every property is kept except explicitly non-visual/
   behavioral ones. `allowed_props` remains only as a reference set. Add to
