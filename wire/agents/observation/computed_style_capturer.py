@@ -151,6 +151,42 @@ class ComputedStyleCapturer:
         logger.info("computed_styles_captured", elements=len(result))
         return result
 
+    DARK_SCHEME_QUERY = "@media (prefers-color-scheme: dark)"
+
+    async def capture_color_scheme(
+        self,
+        page: Page,
+        base_map: Dict[str, Dict[str, str]],
+    ) -> Dict[str, Dict[str, Dict[str, str]]]:
+        """Capture the page's dark-scheme style deltas via media emulation.
+
+        Emulates ``prefers-color-scheme: dark``, re-captures computed styles,
+        and keeps only properties that differ from the (light/default)
+        ``base_map`` — keyed under ``DARK_SCHEME_QUERY`` in the same
+        ``{selector_path: {media_query: {property: value}}}`` shape as
+        ``capture_responsive`` so both merge into the CIDS identically.
+        Pages without dark-mode styles produce an empty map. The emulation is
+        reset afterwards; fails open to ``{}``.
+        """
+        dark: Dict[str, Dict[str, Dict[str, str]]] = {}
+        try:
+            await page.emulate_media(color_scheme="dark")
+            dark_map = await self.capture(page)
+            for path, props in dark_map.items():
+                base = base_map.get(path, {})
+                delta = {k: v for k, v in props.items() if base.get(k) != v}
+                if delta:
+                    dark[path] = {self.DARK_SCHEME_QUERY: delta}
+        except Exception as e:  # pragma: no cover - defensive browser guard
+            logger.warning("dark_scheme_capture_failed", error=str(e))
+        finally:
+            try:
+                await page.emulate_media(color_scheme="light")
+            except Exception:  # pragma: no cover - defensive browser guard
+                pass
+        logger.info("dark_scheme_captured", elements=len(dark))
+        return dark
+
     async def capture_responsive(
         self,
         page: Page,

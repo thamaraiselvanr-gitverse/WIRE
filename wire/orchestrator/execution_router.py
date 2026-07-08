@@ -354,12 +354,20 @@ class ExecutionRouter:
                     page_obj, computed_style_map
                 )
             )
+            # Dark-scheme deltas ride the same media-query mechanism: pages
+            # styled for prefers-color-scheme keep their dark variant.
+            dark_scheme_map = await self.computed_style_capturer.capture_color_scheme(
+                page_obj, computed_style_map
+            )
+            for dark_path, media_map in dark_scheme_map.items():
+                computed_responsive_map.setdefault(dark_path, {}).update(media_map)
             self._save_json(
                 "computed_styles.json",
                 {
                     "url": page_url,
                     "elements_captured": len(computed_style_map),
                     "responsive_elements_captured": len(computed_responsive_map),
+                    "dark_scheme_elements_captured": len(dark_scheme_map),
                 },
             )
 
