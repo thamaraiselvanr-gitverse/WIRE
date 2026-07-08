@@ -1,10 +1,11 @@
 import asyncio
 import hashlib
+import json
 import os
 import random
 import re
 import urllib.parse
-from typing import Any, Dict, List, Optional
+from typing import Any, Awaitable, Callable, Dict, List, Optional
 
 import httpx
 import structlog
@@ -172,12 +173,15 @@ class AssetDownloader:
                 if response is not None and response.status_code == 200:
                     content_to_save = response.content
                     is_css = asset_type == "link" and filename.endswith(".css")
+                    is_manifest = filename.endswith((".webmanifest", ".json"))
+                    is_rewritten = is_css or is_manifest
                     digest = hashlib.sha256(content_to_save).hexdigest()
 
                     # Identical bytes served from a different URL (CDN mirrors,
-                    # duplicated uploads) reuse the already-saved file. CSS is
-                    # exempt: its rewritten url()s depend on the source URL.
-                    if not is_css:
+                    # duplicated uploads) reuse the already-saved file. CSS and
+                    # manifests are exempt: their rewritten refs depend on the
+                    # source URL.
+                    if not is_rewritten:
                         dup = self._content_hash_to_local.get(digest)
                         if dup is not None:
                             self._url_to_local[full_url] = dup
@@ -190,6 +194,14 @@ class AssetDownloader:
                             css_text, full_url, asset_dir, downloaded_assets
                         )
                         content_to_save = css_text.encode("utf-8")
+                    elif is_manifest:
+                        # A web-app manifest references icons/screenshots by
+                        # URL; localize them so the clone's manifest works.
+                        content_to_save = (
+                            await self._localize_manifest(
+                                response.text, full_url, fetch_and_save
+                            )
+                        ).encode("utf-8")
 
                     with open(local_path, "wb") as f:
                         f.write(content_to_save)
@@ -198,7 +210,7 @@ class AssetDownloader:
                     # If this was called from inside a CSS file, the path relative to index.html is 'assets/...'
                     local_ref = f"assets/{safe_name}"
                     self._url_to_local[full_url] = local_ref
-                    if not is_css:
+                    if not is_rewritten:
                         self._content_hash_to_local[digest] = local_ref
                     return local_ref
             except Exception as e:
@@ -303,6 +315,27 @@ class AssetDownloader:
             if rels & icon_rels:
                 tag["href"] = await fetch_and_save(str(tag["href"]), "icon")
 
+        # 3e-bis. Resource hints that reference real files: <link rel=preload/
+        # prefetch/modulepreload> would point at dead URLs in the clone.
+        # DNS-level hints (dns-prefetch/preconnect) reference origins, not
+        # files, and are left alone.
+        preload_as_map = {
+            "style": "link",
+            "script": "script",
+            "image": "img",
+            "font": "font",
+        }
+        for tag in soup.find_all("link", href=True):
+            rels = {r.lower() for r in (tag.get("rel") or [])}
+            if "modulepreload" in rels:
+                tag["href"] = await fetch_and_save(str(tag["href"]), "script")
+            elif rels & {"preload", "prefetch"}:
+                as_type = str(tag.get("as") or "").lower()
+                asset_type = preload_as_map.get(as_type, "media")
+                tag["href"] = await fetch_and_save(str(tag["href"]), asset_type)
+                if tag.has_attr("integrity"):
+                    del tag["integrity"]
+
         # 3f. Social-preview images referenced from <meta content="...">
         # (og:image, twitter:image, msapplication tile, schema.org image).
         meta_image_keys = {
@@ -349,6 +382,46 @@ class AssetDownloader:
         self._normalize_charset(soup)
 
         return str(soup), downloaded_assets
+
+    @staticmethod
+    async def _localize_manifest(
+        manifest_text: str,
+        manifest_url: str,
+        fetch: Callable[..., Awaitable[str]],
+    ) -> str:
+        """Localize icon/screenshot URLs inside a web-app manifest.
+
+        Manifest ``src`` values resolve relative to the manifest's own URL.
+        The saved manifest lives in ``assets/`` next to the downloaded icons,
+        so localized refs are written as bare filenames. Non-JSON or
+        unexpected shapes are passed through untouched.
+        """
+        try:
+            data = json.loads(manifest_text)
+        except (ValueError, TypeError):
+            return manifest_text
+        if not isinstance(data, dict):
+            return manifest_text
+
+        async def _localize_entries(entries: Any) -> None:
+            if not isinstance(entries, list):
+                return
+            for entry in entries:
+                if not isinstance(entry, dict):
+                    continue
+                src = entry.get("src")
+                if not isinstance(src, str) or not src or src.startswith("data:"):
+                    continue
+                local = await fetch(src, "img", source_url=manifest_url)
+                if local.startswith("assets/"):
+                    entry["src"] = local.split("/", 1)[1]
+
+        await _localize_entries(data.get("icons"))
+        await _localize_entries(data.get("screenshots"))
+        for shortcut in data.get("shortcuts") or []:
+            if isinstance(shortcut, dict):
+                await _localize_entries(shortcut.get("icons"))
+        return json.dumps(data)
 
     @staticmethod
     def _normalize_charset(soup: BeautifulSoup) -> None:
