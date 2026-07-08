@@ -91,7 +91,13 @@ is set, so the pipeline runs offline. Live-LLM tests skip without a key.
   asset-localized clone (kept only as a `*_clone` diagnostic). The visual score
   cap is **SSIM** (`ssim_percent`); raw pixel `similarity_percent` is retained
   as a diagnostic. Previously it always returned ~100% regardless of output
-  quality — do not reintroduce that decoupling.
+  quality — do not reintroduce that decoupling. Responsive layout is validated
+  too: the editable output is re-screenshotted at the 768/480 breakpoint
+  widths (matching `ComputedStyleCapturer.DEFAULT_BREAKPOINTS`; originals from
+  `ViewportRenderer`'s `tablet`/`mobile_small` viewports) and the **mean**
+  breakpoint SSIM is a further cap (`visual_fidelity_breakpoints.json`) — a
+  page that only looks right at desktop width is not fully faithful. Low
+  breakpoint scores lower the score but are not critical errors.
 - **Style capture is browser-first**: `ComputedStyleCapturer` reads
   `getComputedStyle` per element into the CIDS (keyed by the parser's
   `node_path`), and the parser prefers those engine-resolved values over the

@@ -17,6 +17,10 @@ class FidelityScorer:
         self.base_score = 100.0
         self.visual_similarity: Optional[float] = None
         self.structural_similarity: Optional[float] = None
+        # Mean SSIM across validated responsive breakpoints (768/480), with
+        # the per-breakpoint breakdown kept for reporting.
+        self.responsive_visual_similarity: Optional[float] = None
+        self.responsive_visual_breakdown: Dict[str, float] = {}
 
     def log_critical_error(
         self, message: str, context: Optional[Dict[str, Any]] = None
@@ -45,6 +49,31 @@ class FidelityScorer:
                 context,
             )
 
+    def record_responsive_visual_similarity(
+        self,
+        breakpoint_scores: Dict[str, float],
+        context: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        """Feed per-breakpoint visual scores (e.g. tablet/mobile SSIM).
+
+        The mean across breakpoints becomes an additional cap on the fidelity
+        score: a reconstruction that only looks right at desktop width is not
+        fully faithful. Unlike the desktop score, a low breakpoint score is
+        not escalated to a critical error — catastrophic divergence is
+        already caught by the desktop check.
+        """
+        valid = {k: float(v) for k, v in breakpoint_scores.items() if v is not None}
+        if not valid:
+            return
+        self.responsive_visual_breakdown = valid
+        self.responsive_visual_similarity = sum(valid.values()) / len(valid)
+        logger.info(
+            "responsive_visual_similarity_recorded",
+            mean=round(self.responsive_visual_similarity, 2),
+            breakdown=valid,
+            context=context,
+        )
+
     def record_structural_similarity(
         self, score: float, context: Optional[Dict[str, Any]] = None
     ) -> None:
@@ -68,4 +97,6 @@ class FidelityScorer:
             score = min(score, self.visual_similarity)
         if self.structural_similarity is not None:
             score = min(score, self.structural_similarity)
+        if self.responsive_visual_similarity is not None:
+            score = min(score, self.responsive_visual_similarity)
         return max(0.0, score)

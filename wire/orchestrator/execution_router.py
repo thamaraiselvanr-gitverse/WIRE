@@ -728,6 +728,50 @@ class ExecutionRouter:
                         self.scorer.record_visual_similarity(
                             visual_score, {"url": page_url}
                         )
+                # Per-breakpoint visual validation: the responsive capture
+                # claims to reproduce layout at the 768/480 breakpoints —
+                # verify by SSIM at those widths against the live originals.
+                # The desktop dynamic mask doesn't apply at other widths.
+                breakpoint_visuals: Dict[str, Any] = {}
+                for vp_name, vp_w, vp_h in (
+                    ("tablet", 768, 1024),
+                    ("mobile_small", 480, 860),
+                ):
+                    bp_original_rel = viewport_results.get(vp_name)
+                    if not bp_original_rel:
+                        continue
+                    bp_editable_rel = await self._capture_reconstruction_screenshot(
+                        "output_editable.html",
+                        f"capture_{vp_name}_editable.png",
+                        width=vp_w,
+                        height=vp_h,
+                    )
+                    if not bp_editable_rel:
+                        continue
+                    bp_result = self.visual_diff.compare_screenshots_normalized(
+                        os.path.join(self.storage.current_run_dir, bp_original_rel),
+                        os.path.join(self.storage.current_run_dir, bp_editable_rel),
+                    )
+                    bp_result["viewport_width"] = vp_w
+                    breakpoint_visuals[vp_name] = bp_result
+                if breakpoint_visuals:
+                    self._save_json(
+                        "visual_fidelity_breakpoints.json", breakpoint_visuals
+                    )
+                    bp_scores = {
+                        name: score
+                        for name, res in breakpoint_visuals.items()
+                        if (
+                            score := res.get(
+                                "ssim_percent", res.get("similarity_percent")
+                            )
+                        )
+                        is not None
+                    }
+                    self.scorer.record_responsive_visual_similarity(
+                        bp_scores, {"url": page_url}
+                    )
+
                 # Diagnostic: pixel fidelity of the high-fidelity clone.
                 clone_screenshot_rel = await self._capture_reconstruction_screenshot()
                 if original_screenshot_path and clone_screenshot_rel:
@@ -763,12 +807,14 @@ class ExecutionRouter:
         self,
         source: str = "index.html",
         out_name: str = "capture_desktop_reconstruction.png",
+        width: int = 1920,
+        height: int = 1080,
     ) -> Optional[str]:
         """
         Renders a locally saved reconstruction file (``index.html`` clone or
-        ``output_editable.html`` product) at the desktop viewport and
+        ``output_editable.html`` product) at the given viewport and
         screenshots it, so it can be pixel-diffed against the live original's
-        desktop capture. Returns the run-relative screenshot path or None.
+        capture at the same width. Returns the run-relative path or None.
         """
         source_path = os.path.join(self.storage.current_run_dir, source)
         if not os.path.exists(source_path):
@@ -777,7 +823,7 @@ class ExecutionRouter:
         file_url = "file://" + os.path.abspath(source_path).replace(os.sep, "/")
         recon_page = await self.browser.context.new_page()  # type: ignore[union-attr]
         try:
-            await recon_page.set_viewport_size({"width": 1920, "height": 1080})
+            await recon_page.set_viewport_size({"width": width, "height": height})
             await recon_page.goto(file_url, wait_until="networkidle", timeout=30000)
             await recon_page.wait_for_timeout(500)
             screenshot = await recon_page.screenshot(full_page=True)

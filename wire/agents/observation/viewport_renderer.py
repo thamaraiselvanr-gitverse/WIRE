@@ -10,9 +10,14 @@ logger = structlog.get_logger(__name__)
 
 
 class ViewportRenderer:
+    # tablet (768) and mobile_small (480) match ComputedStyleCapturer's
+    # DEFAULT_BREAKPOINTS so per-breakpoint visual validation compares the
+    # reconstruction at exactly the widths the responsive capture claims to
+    # reproduce. mobile (375) is kept as a real-device diagnostic capture.
     VIEWPORTS = {
         "desktop": {"width": 1920, "height": 1080},
         "tablet": {"width": 768, "height": 1024},
+        "mobile_small": {"width": 480, "height": 860},
         "mobile": {"width": 375, "height": 812},
     }
 
