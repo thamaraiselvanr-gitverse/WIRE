@@ -135,6 +135,13 @@ is set, so the pipeline runs offline. Live-LLM tests skip without a key.
   score — so "your content without breaking it" is measured, not assumed.
 - `Crawler` does real same-domain BFS only when `single_page=False`
   (opt-in via `ExecutionRouter.enable_multi_page_crawl`, default off).
+- **Tracker stripping is opt-in** (`ExecutionRouter.enable_tracker_stripping`,
+  default off — the default promise is fidelity): `TrackerStripper` removes
+  known analytics/pixel/tag-manager scripts, tracker iframes/pixels (incl.
+  `<noscript>` shells), tracker resource hints, site-verification metas, and
+  `<a ping>` beacons before asset download, writing `tracker_report.json`
+  with counts + matched URLs. Signature/domain-based and conservative —
+  first-party scripts are never touched.
 - Still thin/stubbed: `stealth.py`, `auth_handler.py`, `orchestrator/scheduler.py`
   & `coordinator.py` (single-node simulation), Phase 5 "consensus" (re-renders
   the same URL 3×) and `region_probe` (no real geo egress configured).

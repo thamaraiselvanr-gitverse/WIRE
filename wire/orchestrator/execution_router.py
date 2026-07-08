@@ -14,6 +14,7 @@ from wire.agents.extraction.design_analyzer import DesignAnalyzer
 from wire.agents.extraction.interaction_recorder import InteractionRecorder
 from wire.agents.extraction.legal_detector import LegalDetector
 from wire.agents.extraction.network_monitor import NetworkMonitor
+from wire.agents.extraction.tracker_stripper import TrackerStripper
 from wire.agents.observation.auth_handler import AuthHandler
 from wire.agents.observation.browser_session import BrowserSession
 from wire.agents.observation.computed_style_capturer import ComputedStyleCapturer
@@ -94,6 +95,7 @@ class ExecutionRouter:
         self.crawler = Crawler()
         self.browser = BrowserSession()
         self.downloader = AssetDownloader()
+        self.tracker_stripper = TrackerStripper()
         self.storage = LocalStorage()
         self.scorer = FidelityScorer()
 
@@ -182,6 +184,12 @@ class ExecutionRouter:
         # Refuse to reconstruct targets whose robots.txt disallows crawling.
         # On by default; set False only for explicitly authorized captures.
         self.respect_robots: bool = True
+
+        # Strip analytics/ad/pixel trackers from the clone before asset
+        # download. Off by default: it changes page behavior, and the default
+        # pipeline promise is fidelity. When on, a tracker_report.json records
+        # everything removed.
+        self.enable_tracker_stripping: bool = False
 
     def _check_compliance(self, legal_result: Dict[str, Any]) -> None:
         """Abort (ComplianceError) when robots.txt disallows and respect_robots."""
@@ -290,6 +298,12 @@ class ExecutionRouter:
                 )
                 return result
             original_content = content
+
+            # ── Opt-in: strip trackers before asset download so tracker JS
+            # and pixels are never fetched or localized. ──
+            if self.enable_tracker_stripping:
+                content, tracker_report = self.tracker_stripper.strip(content)
+                self._save_json("tracker_report.json", tracker_report)
 
             # ── Phase 1: Extract & download assets ──
             rewritten_content, assets = await self.downloader.download_assets(
