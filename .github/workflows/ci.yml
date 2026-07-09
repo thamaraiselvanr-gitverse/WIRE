@@ -2,9 +2,9 @@ name: WIRE Platform CI
 
 on:
   push:
-    branches: [ "main" ]
+    branches: [ "master", "main" ]
   pull_request:
-    branches: [ "main" ]
+    branches: [ "master", "main" ]
 
 jobs:
   format-and-lint:
@@ -19,10 +19,13 @@ jobs:
       - name: Install Linting Dependencies
         run: |
           pip install ruff black mypy
+          pip install -e ".[dev]"
       - name: Run Black
         run: black --check wire tests
       - name: Run Ruff
         run: ruff check wire tests
+      - name: Run Mypy
+        run: mypy wire
 
   backend-tests:
     runs-on: ubuntu-latest
@@ -62,4 +65,4 @@ jobs:
       - name: Install dependencies
         run: npm ci
       - name: Run Vitest
-        run: npm run test:ci || echo "Tests pending" # we'll replace this once tests are fully constructed
+        run: npm run test:ci
