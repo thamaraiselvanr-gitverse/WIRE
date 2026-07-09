@@ -51,7 +51,7 @@ export default function TelemetryConsole() {
         <h3 style={{ margin: 0, fontSize: '1.1rem' }}>Platform Telemetry</h3>
       </div>
       
-      <div style={{ flex: 1, overflowY: 'auto', fontFamily: 'monospace', fontSize: '0.85rem', color: '#a0aabf' }}>
+      <div role="log" aria-live="polite" aria-label="Pipeline telemetry" style={{ flex: 1, overflowY: 'auto', fontFamily: 'monospace', fontSize: '0.85rem', color: '#a0aabf' }}>
         {logs.length === 0 ? (
           <div style={{ display: 'flex', height: '100%', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)' }}>
             Awaiting systemic operations...
@@ -279,6 +279,7 @@ export function CommandCenter() {
         <form onSubmit={handleReconstruct} className="composer">
           <input
             type="url"
+            aria-label="Website URL to reconstruct"
             placeholder="https://example.com"
             value={url}
             onChange={e => setUrl(e.target.value)}
@@ -325,7 +326,7 @@ export function CommandCenter() {
 
       {/* Asset Viewer Modal */}
       {selectedProject && (
-        <div style={{
+        <div role="dialog" aria-modal="true" aria-label={`Assets viewer for ${selectedProject.url}`} onKeyDown={(e) => { if (e.key === 'Escape') setSelectedProject(null); }} style={{
           position: 'fixed',
           top: 0,
           left: 0,
@@ -361,6 +362,8 @@ export function CommandCenter() {
               </div>
               <button 
                 onClick={() => setSelectedProject(null)}
+                autoFocus
+                aria-label="Close assets viewer"
                 style={{
                   background: 'rgba(255,255,255,0.05)',
                   border: '1px solid var(--panel-border)',
@@ -375,9 +378,11 @@ export function CommandCenter() {
             </div>
 
             {/* Tab Controls */}
-            <div style={{ display: 'flex', gap: '12px' }}>
+            <div role="tablist" aria-label="Asset views" style={{ display: 'flex', gap: '12px' }}>
               <button 
                 onClick={() => setActiveTab('visuals')}
+                role="tab"
+                aria-selected={activeTab === 'visuals'}
                 style={{
                   background: activeTab === 'visuals' ? 'var(--primary)' : 'transparent',
                   color: activeTab === 'visuals' ? '#000' : 'var(--text-muted)',
@@ -391,6 +396,8 @@ export function CommandCenter() {
               </button>
               <button
                 onClick={() => setActiveTab('preview')}
+                role="tab"
+                aria-selected={activeTab === 'preview'}
                 style={{
                   background: activeTab === 'preview' ? 'var(--primary)' : 'transparent',
                   color: activeTab === 'preview' ? '#000' : 'var(--text-muted)',
@@ -404,6 +411,8 @@ export function CommandCenter() {
               </button>
               <button
                 onClick={() => setActiveTab('content')}
+                role="tab"
+                aria-selected={activeTab === 'content'}
                 style={{
                   background: activeTab === 'content' ? 'var(--primary)' : 'transparent',
                   color: activeTab === 'content' ? '#000' : 'var(--text-muted)',
@@ -417,6 +426,8 @@ export function CommandCenter() {
               </button>
               <button
                 onClick={() => setActiveTab('code')}
+                role="tab"
+                aria-selected={activeTab === 'code'}
                 style={{
                   background: activeTab === 'code' ? 'var(--primary)' : 'transparent',
                   color: activeTab === 'code' ? '#000' : 'var(--text-muted)',
@@ -430,6 +441,8 @@ export function CommandCenter() {
               </button>
               <button 
                 onClick={() => setActiveTab('prompts')}
+                role="tab"
+                aria-selected={activeTab === 'prompts'}
                 style={{
                   background: activeTab === 'prompts' ? 'var(--primary)' : 'transparent',
                   color: activeTab === 'prompts' ? '#000' : 'var(--text-muted)',
@@ -492,7 +505,7 @@ export function CommandCenter() {
                     <button onClick={applyBrand} disabled={brandBusy} className="btn-primary" style={{ padding: '6px 14px', fontSize: '0.85rem' }}>
                       {brandBusy ? 'Applying…' : 'Apply & Preview'}
                     </button>
-                    {brandMessage && <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>{brandMessage}</span>}
+                    {brandMessage && <span role="status" style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>{brandMessage}</span>}
                   </div>
 
                   {/* Editable reconstruction preview */}
@@ -529,7 +542,7 @@ export function CommandCenter() {
                           ft === 'document' ? '.pdf,.docx,.txt,.md,.csv,.html' : undefined;
                         return (
                           <div key={field.field_id} style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                            <label style={{ fontSize: '0.85rem', color: '#dfdfe6' }}>
+                            <label htmlFor={`field-${field.field_id}`} style={{ fontSize: '0.85rem', color: '#dfdfe6' }}>
                               {field.label || field.field_id}
                               <span style={{ color: 'var(--text-muted)', marginLeft: '8px', fontSize: '0.75rem' }}>
                                 ({ft}{field.required ? ', required' : ''})
@@ -537,6 +550,7 @@ export function CommandCenter() {
                             </label>
                             {ft === 'textarea' ? (
                               <textarea
+                                id={`field-${field.field_id}`}
                                 rows={3}
                                 value={(contentValues[field.field_id] as string) || ''}
                                 onChange={(e) => setContentValues((v) => ({ ...v, [field.field_id]: e.target.value }))}
@@ -544,6 +558,7 @@ export function CommandCenter() {
                               />
                             ) : isFile ? (
                               <input
+                                id={`field-${field.field_id}`}
                                 type="file"
                                 accept={accept}
                                 onChange={(e) => { const file = e.target.files?.[0]; if (file) setContentValues((v) => ({ ...v, [field.field_id]: file })); }}
@@ -551,6 +566,7 @@ export function CommandCenter() {
                               />
                             ) : (
                               <input
+                                id={`field-${field.field_id}`}
                                 type={ft === 'url' ? 'url' : 'text'}
                                 value={(contentValues[field.field_id] as string) || ''}
                                 onChange={(e) => setContentValues((v) => ({ ...v, [field.field_id]: e.target.value }))}
@@ -564,7 +580,7 @@ export function CommandCenter() {
                         <button onClick={submitContent} disabled={contentBusy} className="btn-primary" style={{ padding: '8px 16px', fontSize: '0.85rem' }}>
                           {contentBusy ? 'Processing…' : 'Apply Content'}
                         </button>
-                        {contentMessage && <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>{contentMessage}</span>}
+                        {contentMessage && <span role="status" style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>{contentMessage}</span>}
                       </div>
                     </>
                   )}
@@ -577,6 +593,7 @@ export function CommandCenter() {
                   <div style={{ display: 'flex', gap: '8px' }}>
                     <button 
                       onClick={() => setCodeType('react')}
+                      aria-pressed={codeType === 'react'}
                       style={{
                         padding: '6px 12px',
                         fontSize: '0.8rem',
@@ -590,6 +607,7 @@ export function CommandCenter() {
                     </button>
                     <button 
                       onClick={() => setCodeType('vue')}
+                      aria-pressed={codeType === 'vue'}
                       style={{
                         padding: '6px 12px',
                         fontSize: '0.8rem',
@@ -603,6 +621,7 @@ export function CommandCenter() {
                     </button>
                     <button 
                       onClick={() => setCodeType('html')}
+                      aria-pressed={codeType === 'html'}
                       style={{
                         padding: '6px 12px',
                         fontSize: '0.8rem',

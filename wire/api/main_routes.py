@@ -1,6 +1,6 @@
 import asyncio
 from datetime import datetime, timedelta, timezone
-from typing import Any, AsyncGenerator, Dict, List
+from typing import TYPE_CHECKING, Any, AsyncGenerator, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
@@ -56,6 +56,29 @@ def _run_id_for_url(url: str) -> str:
         if not domain:
             domain = "local"
     return domain.replace(":", "_")
+
+
+if TYPE_CHECKING:
+    from wire.orchestrator.execution_router import ExecutionRouter
+
+_router_engine: Optional["ExecutionRouter"] = None
+
+
+def _get_router_engine() -> "ExecutionRouter":
+    """Shared ExecutionRouter for the post-run APIs (brand/substitute).
+
+    Constructing one wires up ~40 pipeline components (incl. the LLM client),
+    which is far too heavy per request. The post-run methods only read
+    ``storage.base_dir`` and work in run-scoped local paths — no shared
+    mutable state — so one lazily-built instance serves all requests. Workers
+    build their own instances; this one never runs ``execute_pipeline``.
+    """
+    global _router_engine
+    if _router_engine is None:
+        from wire.orchestrator.execution_router import ExecutionRouter
+
+        _router_engine = ExecutionRouter()
+    return _router_engine
 
 
 def _project_run_id(project: Project) -> str:
@@ -164,10 +187,8 @@ async def apply_brand(
             status_code=404, detail="Project not found or access denied"
         )
 
-    from wire.orchestrator.execution_router import ExecutionRouter
-
     run_id = _project_run_id(project)
-    router_engine = ExecutionRouter()
+    router_engine = _get_router_engine()
     try:
         summary = router_engine.apply_brand(run_id, {"colors": req.colors})
     except ValueError as e:
@@ -201,7 +222,6 @@ async def substitute_content(
 
     from pydantic import ValidationError
 
-    from wire.orchestrator.execution_router import ExecutionRouter
     from wire.schema.submission_schema import SubmissionPayload
 
     run_id = _project_run_id(project)
@@ -210,7 +230,7 @@ async def substitute_content(
     except ValidationError as e:
         raise HTTPException(status_code=422, detail=f"Invalid submission payload: {e}")
 
-    router_engine = ExecutionRouter()
+    router_engine = _get_router_engine()
     try:
         submission_result = router_engine.generate_transformation_prompt(
             run_id, payload
