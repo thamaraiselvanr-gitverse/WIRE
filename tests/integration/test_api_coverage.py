@@ -29,7 +29,7 @@ def _register(client, name="covuser"):
 @pytest.fixture(autouse=True)
 def _stub_pipeline(monkeypatch):
     # Keep the background reconstruction from launching a real browser.
-    async def _fake(self, url):
+    async def _fake(self, url, run_id=None):
         return 0.0
 
     monkeypatch.setattr(
@@ -108,7 +108,8 @@ def test_file_serving_paths(client, tmp_path, monkeypatch):
     pid = client.post(
         "/api/projects", json={"url": "https://files.test"}, headers=headers
     ).json()["project_id"]
-    host = _run_id_for_url("https://files.test")
+    # New projects are isolated per project id, not keyed by target domain.
+    host = f"project_{pid}"
 
     # Unknown file -> 404 (authenticated).
     missing = client.get(f"/api/projects/{pid}/files/nope.html", headers=headers)
@@ -124,9 +125,16 @@ def test_file_serving_paths(client, tmp_path, monkeypatch):
         with open(os.path.join(assets_dir, "logo.png"), "wb") as f:
             f.write(b"\x89PNG\r\n\x1a\n")
 
-        # Top-level file via query-param token (img/iframe style).
-        top = client.get(f"/api/projects/{pid}/files/index.html?token={token}")
+        # Top-level file via query-param token (img/iframe style): only a
+        # short-lived files-scoped token is accepted in the query string.
+        ft = client.get(f"/api/projects/{pid}/file-token", headers=headers)
+        assert ft.status_code == 200
+        file_token = ft.json()["file_token"]
+        top = client.get(f"/api/projects/{pid}/files/index.html?token={file_token}")
         assert top.status_code == 200
+        # A session JWT in the query string is rejected (it would leak).
+        legacy = client.get(f"/api/projects/{pid}/files/index.html?token={token}")
+        assert legacy.status_code == 401
 
         # Asset path routes into assets/.
         asset = client.get(
@@ -197,7 +205,7 @@ async def test_start_reconstruction_enqueues_durable_job(client):
         assert (await db.get(Project, pid)).status == "pending"
 
     # Drain the queue with a stubbed pipeline; this project ends up completed.
-    async def _ok(url):
+    async def _ok(url, run_id):
         return 91.0
 
     for _ in range(25):

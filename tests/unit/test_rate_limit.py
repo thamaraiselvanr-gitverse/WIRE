@@ -60,7 +60,11 @@ def test_api_reconstruction_rate_limited(client, monkeypatch):
 
     reg = client.post(
         "/api/auth/register",
-        json={"username": "rl", "email": "rl@example.com", "password": "secret123"},
+        json={
+            "username": "rluser",
+            "email": "rl@example.com",
+            "password": "secret123",
+        },
     )
     token = reg.json()["access_token"]
     headers = {"Authorization": f"Bearer {token}"}

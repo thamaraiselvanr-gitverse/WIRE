@@ -19,7 +19,12 @@ def sse_event_broadcaster(logger: Any, log_method: Any, event_dict: Any) -> Any:
                     pieces.append(f"{key}={val}")
             msg = " ".join(pieces)
             for queue in log_event_queues:
-                queue.put_nowait(msg)
+                # Per-queue guard: one slow consumer's full queue must drop
+                # only its own event, not abort delivery to other clients.
+                try:
+                    queue.put_nowait(msg)
+                except Exception:
+                    pass
     except Exception:
         pass
     return event_dict

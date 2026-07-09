@@ -27,19 +27,21 @@ export default function TelemetryConsole() {
   const [logs, setLogs] = useState<string[]>([]);
   
   useEffect(() => {
-    // We append the token as a query parameter because EventSource doesn't support headers easily natively
-    const token = localStorage.getItem('wire_token');
-    if (!token) return;
-    
-    // In a real app we might proxy this or use fetch-event-source, but native works if the backend tolerates it
-    // For now we'll use a standard EventSource mapping to our API.
-    const eventSource = new EventSource(`${API_BASE}/projects/telemetry`);
-    
-    eventSource.onmessage = (event) => {
-      setLogs((prev) => [...prev.slice(-49), event.data]);
-    };
-    
-    return () => eventSource.close();
+    // EventSource can't send an Authorization header, so we mint a
+    // short-lived telemetry-scoped token; the session JWT never goes in a URL.
+    if (!localStorage.getItem('wire_token')) return;
+
+    let eventSource: EventSource | null = null;
+    let cancelled = false;
+    api.get('/auth/stream-token').then(({ data }) => {
+      if (cancelled) return;
+      eventSource = new EventSource(`${API_BASE}/projects/telemetry?token=${data.stream_token}`);
+      eventSource.onmessage = (event) => {
+        setLogs((prev) => [...prev.slice(-49), event.data]);
+      };
+    }).catch(() => { /* telemetry is best-effort */ });
+
+    return () => { cancelled = true; eventSource?.close(); };
   }, []);
 
   return (
@@ -81,6 +83,10 @@ export function CommandCenter() {
   const [brandBusy, setBrandBusy] = useState(false);
   const [brandMessage, setBrandMessage] = useState('');
   const [previewVersion, setPreviewVersion] = useState(0);
+  // Short-lived project-bound token for <img>/<iframe> src URLs; the
+  // session JWT is never embedded in URLs (it would leak into logs and
+  // be readable by the framed, untrusted reconstruction).
+  const [fileToken, setFileToken] = useState<string>('');
   // Content-editor (multi-modal input) state.
   const [schemaFields, setSchemaFields] = useState<SchemaField[]>([]);
   const [contentValues, setContentValues] = useState<Record<string, string | File>>({});
@@ -90,6 +96,13 @@ export function CommandCenter() {
   useEffect(() => {
     fetchProjects();
   }, []);
+
+  useEffect(() => {
+    if (!selectedProject) { setFileToken(''); return; }
+    api.get(`/projects/${selectedProject.id}/file-token`)
+      .then(({ data }) => setFileToken(data.file_token))
+      .catch(() => setFileToken(''));
+  }, [selectedProject]);
 
   useEffect(() => {
     if (selectedProject) {
@@ -252,8 +265,6 @@ export function CommandCenter() {
       console.error(e);
     }
   };
-
-  const token = localStorage.getItem('wire_token');
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
@@ -439,7 +450,7 @@ export function CommandCenter() {
                   <div>
                     <h4 style={{ fontSize: '1rem', marginBottom: '12px' }}>Desktop Capture (1920px)</h4>
                     <img 
-                      src={`${API_BASE}/projects/${selectedProject.id}/files/assets/capture_desktop.png?token=${token}`} 
+                      src={`${API_BASE}/projects/${selectedProject.id}/files/assets/capture_desktop.png?token=${fileToken}`} 
                       alt="Desktop View" 
                       style={{ width: '100%', borderRadius: '8px', border: '1px solid var(--panel-border)', background: '#000' }}
                     />
@@ -448,7 +459,7 @@ export function CommandCenter() {
                     <div>
                       <h4 style={{ fontSize: '1rem', marginBottom: '12px' }}>Tablet Capture (768px)</h4>
                       <img 
-                        src={`${API_BASE}/projects/${selectedProject.id}/files/assets/capture_tablet.png?token=${token}`} 
+                        src={`${API_BASE}/projects/${selectedProject.id}/files/assets/capture_tablet.png?token=${fileToken}`} 
                         alt="Tablet View" 
                         style={{ width: '100%', borderRadius: '8px', border: '1px solid var(--panel-border)', background: '#000' }}
                       />
@@ -456,7 +467,7 @@ export function CommandCenter() {
                     <div>
                       <h4 style={{ fontSize: '1rem', marginBottom: '12px' }}>Mobile Capture (375px)</h4>
                       <img 
-                        src={`${API_BASE}/projects/${selectedProject.id}/files/assets/capture_mobile.png?token=${token}`} 
+                        src={`${API_BASE}/projects/${selectedProject.id}/files/assets/capture_mobile.png?token=${fileToken}`} 
                         alt="Mobile View" 
                         style={{ width: '100%', borderRadius: '8px', border: '1px solid var(--panel-border)', background: '#000' }}
                       />
@@ -488,8 +499,9 @@ export function CommandCenter() {
                   <div style={{ flex: 1, overflow: 'hidden', background: '#fff', border: '1px solid var(--panel-border)', borderRadius: '8px' }}>
                     <iframe
                       key={previewVersion}
+                      sandbox=""
                       title="Editable reconstruction preview"
-                      src={`${API_BASE}/projects/${selectedProject.id}/files/output_editable.html?token=${token}&v=${previewVersion}`}
+                      src={`${API_BASE}/projects/${selectedProject.id}/files/output_editable.html?token=${fileToken}&v=${previewVersion}`}
                       style={{ width: '100%', height: '100%', border: 'none', background: '#fff' }}
                     />
                   </div>

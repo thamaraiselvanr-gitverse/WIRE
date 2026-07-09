@@ -54,7 +54,7 @@ async def test_worker_completes_job(session_factory):
     async with session_factory() as db:
         await job_queue.enqueue(db, pid, "https://ex.com")
 
-    async def runner(url):
+    async def runner(url, run_id):
         return 88.0
 
     processed = await worker.process_one(session_factory, runner)
@@ -69,7 +69,7 @@ async def test_worker_completes_job(session_factory):
 
 @pytest.mark.asyncio
 async def test_process_one_empty_queue_returns_false(session_factory):
-    async def runner(url):
+    async def runner(url, run_id):
         return 1.0
 
     assert await worker.process_one(session_factory, runner) is False
@@ -85,7 +85,7 @@ async def test_worker_retries_then_fails(session_factory):
         db.add(job)
         await db.commit()
 
-    async def failing(url):
+    async def failing(url, run_id):
         raise RuntimeError("pipeline boom")
 
     # First failure -> retried (back to pending).
@@ -132,7 +132,7 @@ async def test_run_worker_bounded_drains_queue(session_factory):
     async with session_factory() as db:
         await job_queue.enqueue(db, pid, "https://ex.com")
 
-    async def runner(url):
+    async def runner(url, run_id):
         return 50.0
 
     # A couple of iterations is enough to claim + finalize the one job.
@@ -157,7 +157,7 @@ async def test_worker_compliance_error_fails_permanently(session_factory):
         db.add(job)
         await db.commit()
 
-    async def blocked(url):
+    async def blocked(url, run_id):
         raise ComplianceError("robots.txt disallows")
 
     await worker.process_one(session_factory, blocked)

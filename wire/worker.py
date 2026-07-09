@@ -21,16 +21,17 @@ from wire.utils.errors import ComplianceError
 
 logger = structlog.get_logger(__name__)
 
-# A runner takes a URL and returns a fidelity score. Injectable for testing.
-Runner = Callable[[str], Awaitable[float]]
+# A runner takes a URL and the project-scoped run id, returning a fidelity
+# score. Injectable for testing.
+Runner = Callable[[str, str], Awaitable[float]]
 # Produces a new AsyncSession (e.g. sessionmaker); used as an async context mgr.
 SessionFactory = Callable[[], AsyncSession]
 
 
-async def _default_runner(url: str) -> float:
+async def _default_runner(url: str, run_id: str) -> float:
     from wire.orchestrator.execution_router import ExecutionRouter
 
-    return await ExecutionRouter().execute_pipeline(url)
+    return await ExecutionRouter().execute_pipeline(url, run_id=run_id)
 
 
 async def process_one(session_factory: SessionFactory, runner: Runner) -> bool:
@@ -38,15 +39,18 @@ async def process_one(session_factory: SessionFactory, runner: Runner) -> bool:
 
     The pipeline runs outside the claim transaction so a long reconstruction
     never holds a DB lock; the result is written back in a fresh session.
+    Output is namespaced per project (``project_<id>``) so concurrent users
+    reconstructing the same domain never share a run directory.
     """
     async with session_factory() as db:
         job = await job_queue.claim_next(db)
         if job is None:
             return False
         job_id, url = cast(int, job.id), cast(str, job.url)
+        run_id = f"project_{cast(int, job.project_id)}"
 
     try:
-        fidelity = await runner(url)
+        fidelity = await runner(url, run_id)
     except ComplianceError as e:
         # Legal/policy block (e.g. robots.txt) — never retry.
         logger.warning("job_blocked_compliance", job_id=job_id, error=str(e))

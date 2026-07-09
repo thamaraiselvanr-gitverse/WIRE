@@ -201,11 +201,17 @@ class ExecutionRouter:
                 "Target disallows crawling via robots.txt; reconstruction refused."
             )
 
-    async def execute_pipeline(self, url: str) -> float:
-        logger.info("executing_full_pipeline", url=url)
+    async def execute_pipeline(self, url: str, run_id: Optional[str] = None) -> float:
+        """Run the full reconstruction pipeline for ``url``.
+
+        ``run_id`` names the output directory (the platform passes
+        ``project_<id>`` so runs are isolated per project); when omitted the
+        directory is derived from the URL's domain (CLI behavior).
+        """
+        logger.info("executing_full_pipeline", url=url, run_id=run_id)
 
         # Initialize storage
-        self.storage.initialize_for_url(url)
+        self.storage.initialize_for_url(url, run_id=run_id)
         self.checkpoint = CheckpointManager(
             os.path.join(self.storage.current_run_dir, ".checkpoint")
         )

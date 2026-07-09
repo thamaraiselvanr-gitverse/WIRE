@@ -3,13 +3,16 @@ from typing import Any, Dict
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordRequestForm
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, field_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
 from .auth import (
     ACCESS_TOKEN_EXPIRE_MINUTES,
+    SCOPED_TOKEN_EXPIRE_MINUTES,
     create_access_token,
+    create_scoped_token,
+    get_current_user,
     get_password_hash,
     verify_password,
 )
@@ -29,6 +32,28 @@ class UserCreate(BaseModel):
     username: str
     email: EmailStr
     password: str
+
+    @field_validator("username")
+    @classmethod
+    def username_shape(cls, v: str) -> str:
+        v = v.strip()
+        if not (3 <= len(v) <= 50):
+            raise ValueError("username must be 3-50 characters")
+        return v
+
+    @field_validator("password")
+    @classmethod
+    def password_strength(cls, v: str) -> str:
+        # Length-first policy (NIST 800-63B): long enough to resist online
+        # guessing, capped to keep bcrypt input bounded (it truncates at 72
+        # bytes anyway).
+        if len(v) < 8:
+            raise ValueError("password must be at least 8 characters")
+        if len(v) > 72:
+            raise ValueError("password must be at most 72 characters")
+        if v.isdigit():
+            raise ValueError("password cannot be all digits")
+        return v
 
 
 class Token(BaseModel):
@@ -87,3 +112,15 @@ async def login(
         data={"sub": user.username}, expires_delta=access_token_expires
     )
     return {"access_token": access_token, "token_type": "bearer"}
+
+
+@router.get("/stream-token")
+async def issue_stream_token(user: Any = Depends(get_current_user)) -> Dict[str, Any]:
+    """Mint a short-lived ``telemetry``-scoped token for EventSource.
+
+    EventSource can't send an Authorization header; embedding the session JWT
+    in the stream URL would leak it. This token only opens the telemetry
+    stream and expires quickly.
+    """
+    token = create_scoped_token(str(user.username), scope="telemetry")
+    return {"stream_token": token, "expires_in": SCOPED_TOKEN_EXPIRE_MINUTES * 60}

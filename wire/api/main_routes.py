@@ -39,7 +39,11 @@ log_event_queues: List["asyncio.Queue[Any]"] = []
 
 
 def _run_id_for_url(url: str) -> str:
-    """Mirror LocalStorage.initialize_for_url's run-directory naming."""
+    """Mirror LocalStorage.initialize_for_url's legacy domain naming.
+
+    Only used as a fallback for projects created before ``Project.run_id``
+    existed; new projects get an isolated ``project_<id>`` directory.
+    """
     from urllib.parse import urlparse
 
     parsed = urlparse(url)
@@ -52,6 +56,13 @@ def _run_id_for_url(url: str) -> str:
         if not domain:
             domain = "local"
     return domain.replace(":", "_")
+
+
+def _project_run_id(project: Project) -> str:
+    """The project's isolated run directory, or the legacy domain fallback."""
+    if project.run_id:
+        return str(project.run_id)
+    return _run_id_for_url(str(project.url))
 
 
 @router.post("")
@@ -105,6 +116,10 @@ async def start_reconstruction(
     db.add(project)
     await db.commit()
     await db.refresh(project)
+    # Isolate this run's artifacts per project — never key output by the
+    # target domain, or two users cloning the same site would share a dir.
+    project.run_id = f"project_{project.id}"  # type: ignore[assignment]
+    await db.commit()
     await enqueue(db, int(project.id), req.url)
 
     return {"message": "Reconstruction queued", "project_id": project.id}
@@ -151,7 +166,7 @@ async def apply_brand(
 
     from wire.orchestrator.execution_router import ExecutionRouter
 
-    run_id = _run_id_for_url(str(project.url))
+    run_id = _project_run_id(project)
     router_engine = ExecutionRouter()
     try:
         summary = router_engine.apply_brand(run_id, {"colors": req.colors})
@@ -189,7 +204,7 @@ async def substitute_content(
     from wire.orchestrator.execution_router import ExecutionRouter
     from wire.schema.submission_schema import SubmissionPayload
 
-    run_id = _run_id_for_url(str(project.url))
+    run_id = _project_run_id(project)
     try:
         payload = SubmissionPayload(run_id=run_id, field_values=req.field_values)
     except ValidationError as e:
@@ -205,38 +220,80 @@ async def substitute_content(
     return submission_result.model_dump()
 
 
-async def get_current_user_file(request: Request, db: AsyncSession) -> Any:
+async def get_current_user_file(
+    request: Request, db: AsyncSession, project_id: int
+) -> Any:
+    """Authenticate a file request via header session token or scoped token.
+
+    Query-string tokens must be short-lived ``files``-scoped tokens bound to
+    this exact project (minted by ``/file-token``). Session JWTs are only
+    accepted from the Authorization header — a session token in a URL leaks
+    into logs, referrers, and any untrusted content that can read its own
+    location.
+    """
     from jose import JWTError, jwt
 
-    from wire.api.auth import ALGORITHM, SECRET_KEY
+    from wire.api.auth import ALGORITHM, SECRET_KEY, decode_scoped_token
     from wire.api.models import User
 
-    # 1. Try Authorization header
-    token = None
+    username = None
+
+    # 1. Authorization header carries the normal session token.
     auth_header = request.headers.get("Authorization")
     if auth_header and auth_header.startswith("Bearer "):
-        token = auth_header.split(" ")[1]
-
-    # 2. Try query parameter (fallback for standard img src / iframe src requests)
-    if not token:
-        token = request.query_params.get("token")
-
-    if not token:
-        raise HTTPException(status_code=401, detail="Authentication token missing")
-
-    try:
-        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-        username: str = payload.get("sub")
+        try:
+            payload = jwt.decode(
+                auth_header.split(" ")[1], SECRET_KEY, algorithms=[ALGORITHM]
+            )
+            username = payload.get("sub")
+        except JWTError:
+            raise HTTPException(status_code=401, detail="Invalid or expired token")
         if not username:
             raise HTTPException(status_code=401, detail="Invalid token payload")
-    except JWTError:
-        raise HTTPException(status_code=401, detail="Invalid or expired token")
+
+    # 2. Query parameter (img/iframe src): scoped file token only.
+    if username is None:
+        token = request.query_params.get("token")
+        if not token:
+            raise HTTPException(status_code=401, detail="Authentication token missing")
+        payload = decode_scoped_token(token, expected_scope="files")
+        if payload.get("project_id") != project_id:
+            raise HTTPException(
+                status_code=401, detail="Token not valid for this project"
+            )
+        username = payload["sub"]
 
     result = await db.execute(select(User).where(User.username == username))
     user = result.scalars().first()
     if not user:
         raise HTTPException(status_code=401, detail="User not found")
     return user
+
+
+@router.get("/{project_id}/file-token")
+async def issue_file_token(
+    project_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> Dict[str, Any]:
+    """Mint a short-lived token for embedding this project's files in
+    ``<img>``/``<iframe>`` src URLs (which can't send an Authorization
+    header). Bound to the project and the ``files`` scope."""
+    from wire.api.auth import SCOPED_TOKEN_EXPIRE_MINUTES, create_scoped_token
+
+    result = await db.execute(
+        select(Project).where(
+            (Project.id == project_id) & (Project.owner_id == current_user.id)
+        )
+    )
+    if not result.scalars().first():
+        raise HTTPException(
+            status_code=404, detail="Project not found or access denied"
+        )
+    token = create_scoped_token(
+        str(current_user.username), scope="files", project_id=project_id
+    )
+    return {"file_token": token, "expires_in": SCOPED_TOKEN_EXPIRE_MINUTES * 60}
 
 
 @router.get("/{project_id}/files/{filename:path}")
@@ -247,8 +304,8 @@ async def get_project_file(
 
     from fastapi.responses import FileResponse
 
-    # Authenticate via header or query token
-    current_user = await get_current_user_file(request, db)
+    # Authenticate via header session token or project-bound scoped token.
+    current_user = await get_current_user_file(request, db, project_id)
 
     # 1. Verify project exists and belongs to current user
     result = await db.execute(
@@ -264,7 +321,7 @@ async def get_project_file(
 
     # 2. Resolve the run directory using the same naming as LocalStorage
     #    (strips "www.", maps ":" to "_") so www.* sites are found correctly.
-    host = _run_id_for_url(str(project.url))
+    host = _project_run_id(project)
 
     # 3. Resolve path cleanly to prevent directory traversal
     if "assets/" in filename or "assets\\" in filename:
@@ -277,13 +334,44 @@ async def get_project_file(
     if not os.path.exists(file_path):
         raise HTTPException(status_code=404, detail=f"File not found: {filename}")
 
-    return FileResponse(file_path)
+    response = FileResponse(file_path)
+    # Reconstructed pages are UNTRUSTED third-party content (the raw clone
+    # keeps the original site's scripts). CSP `sandbox` makes the browser
+    # render them script-less in an opaque origin, so cloned JS can never
+    # run against the API origin or read the embedding URL's token.
+    if file_path.lower().endswith((".html", ".htm", ".svg", ".xml")):
+        response.headers["Content-Security-Policy"] = "sandbox"
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    return response
 
 
 @router.get("/telemetry")
-async def stream_telemetry(request: Request) -> Any:
-    """Server-Sent Events (SSE) telemetry feed for the frontend"""
-    queue: "asyncio.Queue[Any]" = asyncio.Queue()
+async def stream_telemetry(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+) -> Any:
+    """Server-Sent Events (SSE) telemetry feed for the frontend.
+
+    Requires authentication: pipeline logs reveal what is being reconstructed
+    and must not be readable by anonymous clients. EventSource can't send an
+    Authorization header, so a short-lived ``telemetry``-scoped token (from
+    ``/api/auth/stream-token``) is accepted via ``?token=``; session JWTs in
+    the query string are rejected. The queue is bounded so a slow consumer
+    drops events rather than growing memory without limit.
+    """
+    from wire.api.auth import decode_scoped_token
+    from wire.api.auth import get_current_user as _session_user
+
+    auth_header = request.headers.get("Authorization")
+    if auth_header and auth_header.startswith("Bearer "):
+        await _session_user(token=auth_header.split(" ")[1], db=db)
+    else:
+        token = request.query_params.get("token")
+        if not token:
+            raise HTTPException(status_code=401, detail="Authentication token missing")
+        decode_scoped_token(token, expected_scope="telemetry")
+
+    queue: "asyncio.Queue[Any]" = asyncio.Queue(maxsize=500)
     log_event_queues.append(queue)
 
     async def event_generator() -> AsyncGenerator[Dict[str, Any], None]:

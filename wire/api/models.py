@@ -32,6 +32,11 @@ class Project(Base):  # type: ignore[misc]
 
     id = Column(Integer, primary_key=True, index=True)
     url = Column(String, index=True, nullable=False)
+    # Output-directory name for this project's run (``project_<id>``), set at
+    # enqueue time. Isolates artifacts per project: two users reconstructing
+    # the same domain must never share a run directory. Nullable only for
+    # rows created before this column existed (legacy domain-named runs).
+    run_id = Column(String(64), nullable=True)
     status = Column(String, default="pending")  # pending, running, completed, failed
     fidelity_score = Column(Float, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
