@@ -166,9 +166,7 @@ def test_image_value_dims_flow_into_substitution():
             )
         ],
     )
-    iv = ImageValue(
-        value="data", original_filename="pic.png", content_type="image/png"
-    )
+    iv = ImageValue(value="data", original_filename="pic.png", content_type="image/png")
     iv.width = 640
     iv.height = 480
     payload = SubmissionPayload(run_id="r", field_values={"img": iv})
