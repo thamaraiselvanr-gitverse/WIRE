@@ -72,6 +72,7 @@ from wire.semantic.profiles.portfolio_profile import PortfolioProfile
 from wire.semantic.section_classifier import SectionClassifier
 from wire.semantic.slot_discovery import HeuristicSlotDiscoverer
 from wire.storage.local import LocalStorage
+from wire.storage.object_sync import ObjectStorageSync
 from wire.storage.template_repo import TemplateRepository
 from wire.synthesis.knowledge_index import KnowledgeIndex
 from wire.synthesis.prompt_generator import PromptGenerator
@@ -276,9 +277,21 @@ class ExecutionRouter:
         # Clear checkpoint on success
         self.checkpoint.clear()
 
+        # ── Durability: mirror the completed run to object storage when
+        # configured (WIRE_S3_BUCKET). Best-effort — never fails the run. ──
+        if ObjectStorageSync.enabled():
+            sync_report = ObjectStorageSync().upload_run(
+                self.storage.current_run_dir, run_id or self._run_dir_name()
+            )
+            self._save_json("object_sync_report.json", sync_report)
+
         score = self.scorer.compute_score()
         logger.info("pipeline_completed_successfully", fidelity_score=score)
         return score
+
+    def _run_dir_name(self) -> str:
+        """The basename of the current run directory (its object-store key)."""
+        return os.path.basename(self.storage.current_run_dir.rstrip(os.sep))
 
     async def _process_page(
         self, page_url: str, state: Dict[str, Any]

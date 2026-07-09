@@ -148,9 +148,20 @@ is set, so the pipeline runs offline. Live-LLM tests skip without a key.
   `<a ping>` beacons before asset download, writing `tracker_report.json`
   with counts + matched URLs. Signature/domain-based and conservative —
   first-party scripts are never touched.
-- Still thin/stubbed: `stealth.py`, `auth_handler.py`, `orchestrator/scheduler.py`
-  & `coordinator.py` (single-node simulation), Phase 5 "consensus" (re-renders
-  the same URL 3×) and `region_probe` (no real geo egress configured).
+- **Run durability is opt-in** (`storage/object_sync.py`,
+  `ObjectStorageSync`): when `WIRE_S3_BUCKET` is set, a completed run
+  directory is mirrored to an S3-compatible bucket (AWS/MinIO/R2/Spaces via
+  `WIRE_S3_ENDPOINT_URL`) at the end of `execute_pipeline`, writing
+  `object_sync_report.json`. Best-effort — a sync failure is counted, never
+  fails the run; local disk stays the served source of truth. This is a
+  post-run *mirror*, not object-store-native I/O (serving still reads local
+  disk — that replumb is deliberately out of scope). Needs the `objectstore`
+  extra (`boto3`).
+- Still thin/stubbed: `stealth.py`, `auth_handler.py`,
+  `orchestrator/coordinator.py` (single-node in-memory lock), Phase 5
+  "consensus" (re-renders the same URL 3×) and `region_probe` (no real geo
+  egress configured). `orchestrator/scheduler.py` is now honest bounded
+  concurrency (`asyncio.Semaphore`), not a fake NUMA scheduler.
 - **Interactivity is partially restored** by `layout/interactivity_transformer.py`
   (`InteractivityTransformer`): it detects JS-driven dropdowns (class-signalled
   nested submenus → hidden + `:hover`/`:focus-within` reveal via injected CSS)

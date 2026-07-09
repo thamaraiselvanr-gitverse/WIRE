@@ -49,6 +49,12 @@ postgres = [
 observability = [
     "sentry-sdk>=2.0.0",
 ]
+# Object-storage sync for run durability/DR. When WIRE_S3_BUCKET is set,
+# completed runs are mirrored to an S3-compatible bucket; without this extra
+# (or the env var) the pipeline runs unchanged against local disk.
+objectstore = [
+    "boto3>=1.34.0",
+]
 dev = [
     "pytest>=8.1.1",
     "pytest-asyncio>=0.23.6",
@@ -101,6 +107,7 @@ module = [
     "google.genai",
     "google.genai.*",
     "sentry_sdk",
+    "boto3",
 ]
 ignore_missing_imports = true
 
