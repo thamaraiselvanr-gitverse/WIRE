@@ -17,6 +17,7 @@ VERIFICATION LEVEL DIRECTIVE & STATUS:
 """
 
 import os
+import shutil
 import subprocess
 import tempfile
 
@@ -25,6 +26,22 @@ import pytest
 from wire.compilers.react_adapter import ReactAdapter
 from wire.compilers.vue_adapter import VueAdapter
 from wire.schema.canonical import CanonicalDesignSchema, ComponentNode, DesignTokens
+
+# These verification tests shell out to the frontend Node/Vitest toolchain,
+# which is only present where `npm install` has been run in frontend/ (local
+# dev, and the dedicated frontend CI job). The backend-tests CI job installs
+# only Python, so guard each test and skip cleanly when its toolchain is
+# absent rather than failing on a MODULE_NOT_FOUND from node.
+_NODE = shutil.which("node") is not None
+_VITEST = os.path.exists(
+    os.path.join("frontend", "node_modules", "vitest", "vitest.mjs")
+)
+
+requires_node = pytest.mark.skipif(not _NODE, reason="node toolchain not available")
+requires_vitest = pytest.mark.skipif(
+    not (_NODE and _VITEST),
+    reason="frontend Vitest deps not installed (run `npm install` in frontend/)",
+)
 
 
 @pytest.fixture
@@ -68,6 +85,7 @@ def test_cids():
     )
 
 
+@requires_vitest
 def test_react_compiler_full_mount(test_cids):
     """
     Runs Full Mount Verification for compiled React JSX output.
@@ -149,6 +167,7 @@ test('renders React component with declarative shadow root', () => {
                 os.remove(path)
 
 
+@requires_node
 def test_vue_compiler_compile_only(test_cids):
     """
     Runs Compile-Only Verification for Vue template compiler.
