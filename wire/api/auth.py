@@ -1,6 +1,7 @@
+import hashlib
 import os
 import secrets
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Optional
 
 import bcrypt
@@ -12,7 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
 from .database import get_db
-from .models import User
+from .models import RefreshToken, User
 
 logger = structlog.get_logger(__name__)
 
@@ -31,7 +32,21 @@ if not SECRET_KEY:
         "Set JWT_SECRET_KEY to a strong random value in production.",
     )
 ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 * 7  # 7 days
+
+
+def _int_env(name: str, default: int) -> int:
+    try:
+        return int(os.environ.get(name, default))
+    except (TypeError, ValueError):
+        return default
+
+
+# Short-lived access tokens + rotating refresh tokens: a stolen access token
+# ages out within the hour, and refresh tokens are stored (hashed) server-side
+# so they can be revoked. Previously access tokens lived 7 days with no
+# revocation path.
+ACCESS_TOKEN_EXPIRE_MINUTES = _int_env("WIRE_ACCESS_TOKEN_MINUTES", 60)
+REFRESH_TOKEN_EXPIRE_DAYS = _int_env("WIRE_REFRESH_TOKEN_DAYS", 14)
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login")
 
@@ -50,13 +65,69 @@ def create_access_token(
     data: Dict[str, Any], expires_delta: Optional[timedelta] = None
 ) -> str:
     to_encode = data.copy()
-    if expires_delta:
-        expire = datetime.utcnow() + expires_delta
-    else:
-        expire = datetime.utcnow() + timedelta(minutes=15)
+    # tz-aware arithmetic: naive utcnow() is deprecated and one implicit
+    # local-time assumption away from wrong expiries.
+    expire = datetime.now(timezone.utc) + (expires_delta or timedelta(minutes=15))
     to_encode.update({"exp": expire})
     encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
     return encoded_jwt  # type: ignore[no-any-return]
+
+
+def _hash_refresh_token(raw: str) -> str:
+    # sha256, not bcrypt: refresh tokens are 48-byte random secrets (no
+    # brute-force surface) and lookups happen by exact hash match.
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
+async def mint_refresh_token(db: AsyncSession, user: User) -> str:
+    """Create, persist (hashed), and return a new opaque refresh token."""
+    raw = secrets.token_urlsafe(48)
+    db.add(
+        RefreshToken(
+            user_id=user.id,
+            token_hash=_hash_refresh_token(raw),
+            expires_at=datetime.now(timezone.utc)
+            + timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS),
+        )
+    )
+    await db.commit()
+    return raw
+
+
+async def consume_refresh_token(db: AsyncSession, raw: str) -> Optional[User]:
+    """Validate + revoke a refresh token (rotation); return its user.
+
+    Single-use: a presented token is revoked whether or not a new one is
+    minted, so a replayed (stolen) token is dead after the legitimate
+    client's first refresh. Returns None for unknown/expired/revoked tokens.
+    """
+    result = await db.execute(
+        select(RefreshToken).where(RefreshToken.token_hash == _hash_refresh_token(raw))
+    )
+    token = result.scalars().first()
+    if token is None or bool(token.revoked):
+        return None
+    expires_at = token.expires_at
+    if expires_at is not None and expires_at.tzinfo is None:
+        expires_at = expires_at.replace(tzinfo=timezone.utc)
+    if expires_at is not None and expires_at < datetime.now(timezone.utc):
+        return None
+    token.revoked = True  # type: ignore[assignment]
+    await db.commit()
+    return await db.get(User, token.user_id)
+
+
+async def revoke_refresh_token(db: AsyncSession, raw: str) -> bool:
+    """Revoke a refresh token (logout). Returns True if one was revoked."""
+    result = await db.execute(
+        select(RefreshToken).where(RefreshToken.token_hash == _hash_refresh_token(raw))
+    )
+    token = result.scalars().first()
+    if token is None or bool(token.revoked):
+        return False
+    token.revoked = True  # type: ignore[assignment]
+    await db.commit()
+    return True
 
 
 SCOPED_TOKEN_EXPIRE_MINUTES = 15

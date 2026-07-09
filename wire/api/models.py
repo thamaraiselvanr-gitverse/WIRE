@@ -27,6 +27,24 @@ class User(Base):  # type: ignore[misc]
     projects = relationship("Project", back_populates="owner")
 
 
+class RefreshToken(Base):  # type: ignore[misc]
+    """A rotating, revocable refresh token (stored hashed, never raw).
+
+    Access tokens are short-lived; these let clients stay signed in while
+    giving the server a revocation path (logout, compromise response).
+    Single-use: consuming one revokes it and mints a successor.
+    """
+
+    __tablename__ = "refresh_tokens"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    token_hash = Column(String(64), unique=True, index=True, nullable=False)
+    expires_at = Column(DateTime(timezone=True), nullable=False)
+    revoked = Column(Boolean, default=False, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
 class Project(Base):  # type: ignore[misc]
     __tablename__ = "projects"
 
@@ -64,6 +82,13 @@ class ReconstructionJob(Base):  # type: ignore[misc]
     attempts = Column(Integer, default=0, nullable=False)
     max_attempts = Column(Integer, default=3, nullable=False)
     error = Column(Text, nullable=True)
+    # Set on claim; result writes are guarded by it so a worker whose job was
+    # requeued as stale (and re-claimed elsewhere) cannot double-write.
+    claim_token = Column(String(32), nullable=True)
+    # Refreshed periodically by the running worker; stale recovery keys off
+    # this (falling back to started_at), so a long-but-alive run isn't
+    # requeued while a crashed worker's job is.
+    heartbeat_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     started_at = Column(DateTime(timezone=True), nullable=True)
     updated_at = Column(

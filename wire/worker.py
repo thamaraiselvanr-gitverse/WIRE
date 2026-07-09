@@ -11,15 +11,22 @@ concurrently against the same database without a message broker.
 """
 
 import asyncio
+import contextlib
+import time
 from typing import Awaitable, Callable, Optional, cast
 
 import structlog
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from wire.api import job_queue
+from wire.api.metrics import histogram
 from wire.utils.errors import ComplianceError
 
 logger = structlog.get_logger(__name__)
+
+# How often a running worker refreshes its job's heartbeat. Stale recovery
+# (default 1800s) only requeues jobs several missed beats old.
+HEARTBEAT_INTERVAL_SECONDS = 60.0
 
 # A runner takes a URL and the project-scoped run id, returning a fidelity
 # score. Injectable for testing.
@@ -34,37 +41,70 @@ async def _default_runner(url: str, run_id: str) -> float:
     return await ExecutionRouter().execute_pipeline(url, run_id=run_id)
 
 
-async def process_one(session_factory: SessionFactory, runner: Runner) -> bool:
+async def _heartbeat_loop(
+    session_factory: SessionFactory, job_id: int, claim_token: str, interval: float
+) -> None:
+    """Refresh the job's heartbeat until cancelled (best-effort)."""
+    while True:
+        await asyncio.sleep(interval)
+        try:
+            async with session_factory() as db:
+                alive = await job_queue.heartbeat(db, job_id, claim_token)
+            if not alive:
+                logger.warning("job_claim_lost", job_id=job_id)
+                return
+        except Exception as e:  # pragma: no cover - transient DB blips
+            logger.warning("heartbeat_failed", job_id=job_id, error=str(e))
+
+
+async def process_one(
+    session_factory: SessionFactory,
+    runner: Runner,
+    heartbeat_interval: float = HEARTBEAT_INTERVAL_SECONDS,
+) -> bool:
     """Claim and run a single job. Returns True if one was processed.
 
     The pipeline runs outside the claim transaction so a long reconstruction
     never holds a DB lock; the result is written back in a fresh session.
     Output is namespaced per project (``project_<id>``) so concurrent users
-    reconstructing the same domain never share a run directory.
+    reconstructing the same domain never share a run directory. A heartbeat
+    task keeps the claim fresh while the pipeline runs, and every result
+    write carries the claim token so a stale (requeued) worker's late result
+    is discarded rather than double-written.
     """
     async with session_factory() as db:
         job = await job_queue.claim_next(db)
         if job is None:
             return False
         job_id, url = cast(int, job.id), cast(str, job.url)
+        claim_token = cast(str, job.claim_token)
         run_id = f"project_{cast(int, job.project_id)}"
 
+    beat = asyncio.create_task(
+        _heartbeat_loop(session_factory, job_id, claim_token, heartbeat_interval)
+    )
+    started = time.monotonic()
     try:
         fidelity = await runner(url, run_id)
     except ComplianceError as e:
         # Legal/policy block (e.g. robots.txt) — never retry.
         logger.warning("job_blocked_compliance", job_id=job_id, error=str(e))
         async with session_factory() as db:
-            await job_queue.fail_permanent(db, job_id, str(e))
+            await job_queue.fail_permanent(db, job_id, str(e), claim_token)
         return True
     except Exception as e:
         logger.error("job_run_failed", job_id=job_id, error=str(e))
         async with session_factory() as db:
-            await job_queue.fail(db, job_id, str(e))
+            await job_queue.fail(db, job_id, str(e), claim_token)
         return True
+    finally:
+        beat.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await beat
+        histogram("pipeline_duration_seconds").observe(time.monotonic() - started)
 
     async with session_factory() as db:
-        await job_queue.complete(db, job_id, fidelity)
+        await job_queue.complete(db, job_id, fidelity, claim_token)
     return True
 
 

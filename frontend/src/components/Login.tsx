@@ -21,9 +21,11 @@ export default function Login() {
         params.append('password', password);
         const { data } = await api.post('/auth/login', params);
         localStorage.setItem('wire_token', data.access_token);
+        localStorage.setItem('wire_refresh_token', data.refresh_token);
       } else {
         const { data } = await api.post('/auth/register', { username, email, password });
         localStorage.setItem('wire_token', data.access_token);
+        localStorage.setItem('wire_refresh_token', data.refresh_token);
       }
       navigate('/dashboard');
     } catch (err) {

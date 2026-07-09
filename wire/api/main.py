@@ -66,6 +66,40 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
+@app.middleware("http")
+async def security_headers(request: Any, call_next: Any) -> Any:
+    """Baseline security headers + request-latency histogram on every response.
+
+    ``setdefault`` so route-specific headers win (the file endpoint sets its
+    own CSP ``sandbox`` for untrusted reconstructed pages). Framing is denied
+    everywhere except served files — the dashboard legitimately embeds
+    ``/files/*.html`` previews in an iframe. HSTS is opt-in via
+    ``WIRE_ENABLE_HSTS`` because emitting it from a plain-HTTP deployment
+    (local dev, behind-TLS-terminating-proxy misconfig) can lock browsers out.
+    The SSE telemetry stream is excluded from latency (connections are
+    intentionally long-lived and would swamp the histogram).
+    """
+    import time
+
+    from .metrics import histogram
+
+    start = time.perf_counter()
+    response = await call_next(request)
+    if "/telemetry" not in request.url.path:
+        histogram("http_request_duration_seconds").observe(time.perf_counter() - start)
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("Referrer-Policy", "no-referrer")
+    if "/files/" not in request.url.path:
+        response.headers.setdefault("X-Frame-Options", "DENY")
+        response.headers.setdefault("Content-Security-Policy", "frame-ancestors 'none'")
+    if os.environ.get("WIRE_ENABLE_HSTS", "").lower() in ("1", "true", "yes"):
+        response.headers.setdefault(
+            "Strict-Transport-Security", "max-age=31536000; includeSubDomains"
+        )
+    return response
+
+
 app.include_router(auth_router)
 app.include_router(projects_router)
 

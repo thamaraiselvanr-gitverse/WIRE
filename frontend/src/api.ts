@@ -18,6 +18,50 @@ api.interceptors.request.use((config) => {
   return config;
 });
 
+// Silent refresh: on a 401 (expired access token), exchange the rotating
+// refresh token for a new pair and retry the request once. Concurrent 401s
+// share one in-flight refresh so rotation isn't raced. On refresh failure
+// the session is over: clear tokens and send the user back to login.
+let refreshInFlight: Promise<string | null> | null = null;
+
+async function refreshAccessToken(): Promise<string | null> {
+  const refreshToken = localStorage.getItem('wire_refresh_token');
+  if (!refreshToken) return null;
+  try {
+    // Plain axios: the api instance's interceptors must not recurse here.
+    const { data } = await axios.post(`${API_BASE}/auth/refresh`, {
+      refresh_token: refreshToken,
+    });
+    localStorage.setItem('wire_token', data.access_token);
+    localStorage.setItem('wire_refresh_token', data.refresh_token);
+    return data.access_token;
+  } catch {
+    localStorage.removeItem('wire_token');
+    localStorage.removeItem('wire_refresh_token');
+    return null;
+  }
+}
+
+api.interceptors.response.use(
+  (response) => response,
+  async (error) => {
+    const original = error.config;
+    const isAuthCall = original?.url?.includes('/auth/');
+    if (error.response?.status === 401 && original && !original._retried && !isAuthCall) {
+      original._retried = true;
+      refreshInFlight = refreshInFlight ?? refreshAccessToken();
+      const token = await refreshInFlight;
+      refreshInFlight = null;
+      if (token) {
+        original.headers = { ...original.headers, Authorization: `Bearer ${token}` };
+        return api.request(original);
+      }
+      window.location.href = '/';
+    }
+    return Promise.reject(error);
+  },
+);
+
 /** Extract a human-readable message from an API/network error without `any`. */
 export function apiErrorMessage(
   err: unknown,

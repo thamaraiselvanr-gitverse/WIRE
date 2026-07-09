@@ -10,10 +10,13 @@ from sqlalchemy.future import select
 from .auth import (
     ACCESS_TOKEN_EXPIRE_MINUTES,
     SCOPED_TOKEN_EXPIRE_MINUTES,
+    consume_refresh_token,
     create_access_token,
     create_scoped_token,
     get_current_user,
     get_password_hash,
+    mint_refresh_token,
+    revoke_refresh_token,
     verify_password,
 )
 from .database import get_db
@@ -59,6 +62,11 @@ class UserCreate(BaseModel):
 class Token(BaseModel):
     access_token: str
     token_type: str
+    refresh_token: str
+
+
+class RefreshRequest(BaseModel):
+    refresh_token: str
 
 
 @router.post("/register", response_model=Token)
@@ -89,7 +97,12 @@ async def register(
     access_token = create_access_token(
         data={"sub": db_user.username}, expires_delta=access_token_expires
     )
-    return {"access_token": access_token, "token_type": "bearer"}
+    refresh_token = await mint_refresh_token(db, db_user)
+    return {
+        "access_token": access_token,
+        "token_type": "bearer",
+        "refresh_token": refresh_token,
+    }
 
 
 @router.post("/login", response_model=Token)
@@ -111,7 +124,51 @@ async def login(
     access_token = create_access_token(
         data={"sub": user.username}, expires_delta=access_token_expires
     )
-    return {"access_token": access_token, "token_type": "bearer"}
+    refresh_token = await mint_refresh_token(db, user)
+    return {
+        "access_token": access_token,
+        "token_type": "bearer",
+        "refresh_token": refresh_token,
+    }
+
+
+@router.post("/refresh", response_model=Token)
+async def refresh(
+    req: RefreshRequest, request: Request, db: AsyncSession = Depends(get_db)
+) -> Dict[str, Any]:
+    """Exchange a refresh token for a new access + refresh pair (rotation).
+
+    The presented token is single-use: it is revoked on consumption, so a
+    replayed copy is dead after the first legitimate refresh.
+    """
+    auth_limiter.check(_client_key(request))
+    user = await consume_refresh_token(db, req.refresh_token)
+    if user is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired refresh token",
+        )
+    access_token = create_access_token(
+        data={"sub": user.username},
+        expires_delta=timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES),
+    )
+    new_refresh = await mint_refresh_token(db, user)
+    return {
+        "access_token": access_token,
+        "token_type": "bearer",
+        "refresh_token": new_refresh,
+    }
+
+
+@router.post("/logout")
+async def logout(
+    req: RefreshRequest, request: Request, db: AsyncSession = Depends(get_db)
+) -> Dict[str, Any]:
+    """Revoke a refresh token. Possession is sufficient authorization —
+    revoking a token you hold is never an escalation."""
+    auth_limiter.check(_client_key(request))
+    revoked = await revoke_refresh_token(db, req.refresh_token)
+    return {"revoked": revoked}
 
 
 @router.get("/stream-token")
