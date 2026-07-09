@@ -14,6 +14,11 @@ COPY pyproject.toml README.md ./
 COPY wire ./wire
 RUN pip install --upgrade pip && pip install .
 
+# Migrations ship in the image so `alembic upgrade head` runs in-container
+# (the compose stack runs it as a one-shot step before the API starts).
+COPY alembic.ini ./
+COPY migrations ./migrations
+
 # Install Chromium matched to the installed Playwright version, plus its OS
 # runtime libraries; make the browser dir readable by the runtime user.
 RUN playwright install --with-deps chromium \
