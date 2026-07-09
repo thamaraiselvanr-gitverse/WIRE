@@ -6,14 +6,20 @@ and are marked @pytest.mark.slow so they are excluded from fast CI/CD runs.
 
 Run with:  python -m pytest tests/test_interaction_fidelity.py -v -m slow
 """
-import os
-import pytest
-from wire.agents.extraction.interaction_recorder import InteractionRecorder, MAX_INTERACTION_LIMIT
 
+import os
+
+import pytest
+
+from wire.agents.extraction.interaction_recorder import (
+    MAX_INTERACTION_LIMIT,
+    InteractionRecorder,
+)
 
 # ─────────────────────────────────────────────────────────────
 # 1. Unit-level noise filter tests (fast, no browser needed)
 # ─────────────────────────────────────────────────────────────
+
 
 class TestNoiseFilter:
     """Validate the semantic normalizer catches false-positive diffs."""
@@ -38,9 +44,7 @@ class TestNoiseFilter:
 
     def test_truly_different_colors(self):
         """Black and red must be flagged as different."""
-        assert InteractionRecorder._is_meaningful_diff(
-            "rgb(0, 0, 0)", "rgb(255, 0, 0)"
-        )
+        assert InteractionRecorder._is_meaningful_diff("rgb(0, 0, 0)", "rgb(255, 0, 0)")
 
     def test_alpha_change_is_meaningful(self):
         """Going from fully opaque to transparent is a real change."""
@@ -57,6 +61,7 @@ class TestNoiseFilter:
 # ─────────────────────────────────────────────────────────────
 # 2. Interaction cap enforcement (no browser needed)
 # ─────────────────────────────────────────────────────────────
+
 
 class TestInteractionLimits:
     def test_max_limit_constant(self):
@@ -90,7 +95,9 @@ async def test_meaningful_hover_detected():
     async with async_playwright() as p:
         browser = await p.chromium.launch(headless=True)
         page = await browser.new_page(viewport={"width": 1280, "height": 720})
-        await page.goto(f"file:///{FIXTURE_PATH.replace(os.sep, '/')}", wait_until="networkidle")
+        await page.goto(
+            f"file:///{FIXTURE_PATH.replace(os.sep, '/')}", wait_until="networkidle"
+        )
 
         # Locate .btn-target bounding box
         btn = page.locator(".btn-target")
@@ -99,6 +106,7 @@ async def test_meaningful_hover_detected():
 
         recorder = InteractionRecorder()
         import tempfile
+
         with tempfile.TemporaryDirectory() as tmpdir:
             results = await recorder.record_hover_states(
                 page,
@@ -126,7 +134,9 @@ async def test_noise_hover_filtered():
     async with async_playwright() as p:
         browser = await p.chromium.launch(headless=True)
         page = await browser.new_page(viewport={"width": 1280, "height": 720})
-        await page.goto(f"file:///{FIXTURE_PATH.replace(os.sep, '/')}", wait_until="networkidle")
+        await page.goto(
+            f"file:///{FIXTURE_PATH.replace(os.sep, '/')}", wait_until="networkidle"
+        )
 
         link = page.locator(".link-noise")
         bbox = await link.bounding_box()
@@ -134,6 +144,7 @@ async def test_noise_hover_filtered():
 
         recorder = InteractionRecorder()
         import tempfile
+
         with tempfile.TemporaryDirectory() as tmpdir:
             results = await recorder.record_hover_states(
                 page,
@@ -159,7 +170,9 @@ async def test_determinism_across_runs():
     async with async_playwright() as p:
         browser = await p.chromium.launch(headless=True)
         page = await browser.new_page(viewport={"width": 1280, "height": 720})
-        await page.goto(f"file:///{FIXTURE_PATH.replace(os.sep, '/')}", wait_until="networkidle")
+        await page.goto(
+            f"file:///{FIXTURE_PATH.replace(os.sep, '/')}", wait_until="networkidle"
+        )
 
         btn = page.locator(".btn-target")
         bbox = await btn.bounding_box()
@@ -181,17 +194,19 @@ async def test_determinism_across_runs():
                 # Normalize: strip screenshot paths (OS-dependent) for comparison
                 cleaned = []
                 for entry in r:
-                    cleaned.append({
-                        "selector": entry["selector"],
-                        "style_diff": entry["style_diff"],
-                    })
+                    cleaned.append(
+                        {
+                            "selector": entry["selector"],
+                            "style_diff": entry["style_diff"],
+                        }
+                    )
                 run_results.append(cleaned)
 
         await browser.close()
 
-    assert run_results[0] == run_results[1], (
-        f"Determinism violated!\nRun 1: {run_results[0]}\nRun 2: {run_results[1]}"
-    )
+    assert (
+        run_results[0] == run_results[1]
+    ), f"Determinism violated!\nRun 1: {run_results[0]}\nRun 2: {run_results[1]}"
 
 
 @pytest.mark.slow
@@ -207,7 +222,9 @@ async def test_combinatorial_cap_enforcement():
     async with async_playwright() as p:
         browser = await p.chromium.launch(headless=True)
         page = await browser.new_page(viewport={"width": 1280, "height": 2000})
-        await page.goto(f"file:///{FIXTURE_PATH.replace(os.sep, '/')}", wait_until="networkidle")
+        await page.goto(
+            f"file:///{FIXTURE_PATH.replace(os.sep, '/')}", wait_until="networkidle"
+        )
 
         # Collect all .explosion-btn bounding boxes
         locators = page.locator(".explosion-btn")
@@ -218,10 +235,13 @@ async def test_combinatorial_cap_enforcement():
         for idx in range(count):
             bbox = await locators.nth(idx).bounding_box()
             if bbox:
-                elements.append({"bbox": bbox, "selector": f".explosion-btn:nth({idx})"})
+                elements.append(
+                    {"bbox": bbox, "selector": f".explosion-btn:nth({idx})"}
+                )
 
         recorder = InteractionRecorder()
         import tempfile
+
         with tempfile.TemporaryDirectory() as tmpdir:
             results = await recorder.record_hover_states(page, elements, tmpdir)
 
@@ -230,6 +250,6 @@ async def test_combinatorial_cap_enforcement():
     # The system MUST have capped at 50
     assert len(elements) == 60
     # results length will be <= 50 (only meaningful diffs among the capped 50 get recorded)
-    assert len(results) <= MAX_INTERACTION_LIMIT, (
-        f"Cap violated! Got {len(results)} results exceeding limit of {MAX_INTERACTION_LIMIT}"
-    )
+    assert (
+        len(results) <= MAX_INTERACTION_LIMIT
+    ), f"Cap violated! Got {len(results)} results exceeding limit of {MAX_INTERACTION_LIMIT}"

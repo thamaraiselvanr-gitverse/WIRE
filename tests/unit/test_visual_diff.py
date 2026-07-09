@@ -1,7 +1,9 @@
 import os
 import tempfile
+
 import pytest
 from PIL import Image
+
 from wire.validation.visual_diff import VisualDiff
 
 
@@ -46,3 +48,14 @@ def test_visual_diff_sanity_check():
         with pytest.raises(ValueError) as excinfo:
             diff.compare_screenshots(img_path1, img_path3)
         assert "dimensions do not match" in str(excinfo.value)
+
+        # 4. Mismatched dimensions via the normalized comparator: should resize
+        # instead of raising, and flag that a resize occurred.
+        res_normalized = diff.compare_screenshots_normalized(img_path1, img_path3)
+        assert res_normalized["dimension_normalized"] is True
+        assert res_normalized["similarity_percent"] == 100.0
+
+        # 5. Normalized comparator on matching dimensions behaves like compare_screenshots.
+        res_normalized_same = diff.compare_screenshots_normalized(img_path1, img_path2)
+        assert res_normalized_same["dimension_normalized"] is False
+        assert res_normalized_same["similarity_percent"] == 90.0

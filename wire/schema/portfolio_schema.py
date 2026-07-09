@@ -16,6 +16,7 @@ from pydantic import BaseModel, Field
 
 class PortfolioField(BaseModel):
     """A portfolio-specific field mapped from a general FormField."""
+
     field_id: str
     slot_id: str
     portfolio_category: str
@@ -29,6 +30,7 @@ class PortfolioField(BaseModel):
 
 class PortfolioSection(BaseModel):
     """A portfolio-specific section grouping mapped fields."""
+
     portfolio_category: str
     display_name: str
     fields: List[PortfolioField] = Field(default_factory=list)
@@ -38,10 +40,11 @@ class PortfolioSection(BaseModel):
 class PortfolioFormSchema(BaseModel):
     """
     Portfolio domain-specific form schema — Phase 7b output artifact.
-    
+
     Consumed by the eventual portfolio form-rendering UI. Produced by
     PortfolioProfile.adapt() from a general WebsiteFormSchema.
     """
+
     schema_version: str = "1.0"
     source_url: str
     sections: List[PortfolioSection] = Field(default_factory=list)

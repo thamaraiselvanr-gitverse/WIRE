@@ -1,5 +1,7 @@
 import os
-from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
+from typing import AsyncGenerator
+
+from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.orm import declarative_base, sessionmaker
 
 DATABASE_URL = os.environ.get("DATABASE_URL", "sqlite+aiosqlite:///./wire_platform.db")
@@ -7,15 +9,18 @@ DATABASE_URL = os.environ.get("DATABASE_URL", "sqlite+aiosqlite:///./wire_platfo
 engine = create_async_engine(
     DATABASE_URL,
     echo=False,
-    connect_args={"check_same_thread": False} if DATABASE_URL.startswith("sqlite") else {}
+    connect_args=(
+        {"check_same_thread": False} if DATABASE_URL.startswith("sqlite") else {}
+    ),
 )
 
-AsyncSessionLocal = sessionmaker(
+AsyncSessionLocal = sessionmaker(  # type: ignore[call-overload]
     bind=engine, class_=AsyncSession, expire_on_commit=False
 )
 
 Base = declarative_base()
 
-async def get_db():
+
+async def get_db() -> AsyncGenerator[AsyncSession, None]:
     async with AsyncSessionLocal() as session:
         yield session

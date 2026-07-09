@@ -7,19 +7,18 @@ sparse/mostly-empty output for non-portfolio site types — proving the
 domain-profile boundary holds.
 """
 
-import pytest
+from wire.schema.portfolio_schema import PortfolioFormSchema, PortfolioSection
 from wire.schema.semantic_schema import (
-    SectionRole,
     ContentState,
-    FormFieldType,
     FormField,
+    FormFieldType,
+    SectionRole,
     WebsiteFormSchema,
 )
-from wire.schema.portfolio_schema import PortfolioFormSchema, PortfolioSection
 from wire.semantic.profiles.portfolio_profile import PortfolioProfile
 
-
 # ── Helpers ─────────────────────────────────────────────────────────────
+
 
 def _make_field(role: SectionRole, slot_id: str, label: str = "Test") -> FormField:
     """Create a minimal FormField for testing."""
@@ -40,8 +39,12 @@ def _portfolio_schema() -> WebsiteFormSchema:
     return WebsiteFormSchema(
         source_url="https://portfolio-site.com",
         sections=[
-            SectionRole.HERO, SectionRole.ABOUT, SectionRole.PORTFOLIO,
-            SectionRole.CONTACT, SectionRole.SOCIAL_LINKS, SectionRole.FOOTER,
+            SectionRole.HERO,
+            SectionRole.ABOUT,
+            SectionRole.PORTFOLIO,
+            SectionRole.CONTACT,
+            SectionRole.SOCIAL_LINKS,
+            SectionRole.FOOTER,
         ],
         fields=[
             _make_field(SectionRole.HERO, "hero_title", "Hero Title"),
@@ -60,8 +63,12 @@ def _saas_schema() -> WebsiteFormSchema:
     return WebsiteFormSchema(
         source_url="https://saas-product.com",
         sections=[
-            SectionRole.HERO, SectionRole.FEATURE_GRID, SectionRole.PRICING,
-            SectionRole.CTA, SectionRole.FAQ, SectionRole.FOOTER,
+            SectionRole.HERO,
+            SectionRole.FEATURE_GRID,
+            SectionRole.PRICING,
+            SectionRole.CTA,
+            SectionRole.FAQ,
+            SectionRole.FOOTER,
         ],
         fields=[
             _make_field(SectionRole.HERO, "saas_title", "SaaS Title"),
@@ -79,6 +86,7 @@ def _saas_schema() -> WebsiteFormSchema:
 # ═══════════════════════════════════════════════════════════════════════
 # PORTFOLIO PROFILE TESTS
 # ═══════════════════════════════════════════════════════════════════════
+
 
 class TestPortfolioProfileMapping:
     """Verify correct mapping of general roles to portfolio categories."""
@@ -131,11 +139,7 @@ class TestPortfolioProfileMapping:
         result = self.profile.adapt(schema)
         assert result.excluded_fields >= 1
         # Verify footer text is not in any portfolio section
-        all_slot_ids = [
-            f.slot_id
-            for s in result.sections
-            for f in s.fields
-        ]
+        all_slot_ids = [f.slot_id for s in result.sections for f in s.fields]
         assert "footer_text" not in all_slot_ids
 
     def test_field_counts_are_consistent(self):
@@ -145,7 +149,9 @@ class TestPortfolioProfileMapping:
         assert result.mapped_fields + result.excluded_fields == result.total_fields
 
     @staticmethod
-    def _find_section(schema: PortfolioFormSchema, category: str) -> PortfolioSection | None:
+    def _find_section(
+        schema: PortfolioFormSchema, category: str
+    ) -> PortfolioSection | None:
         for s in schema.sections:
             if s.portfolio_category == category:
                 return s
@@ -228,7 +234,9 @@ class TestPortfolioProfileBoundary:
 
         # HERO maps to bio_header, FEATURE_GRID maps to skills — those are the
         # only applicable mappings. PRICING, CTA, FAQ, FOOTER map to None.
-        assert len(applicable_sections) <= 3  # at most hero→bio_header, features→skills, footer excluded
+        assert (
+            len(applicable_sections) <= 3
+        )  # at most hero→bio_header, features→skills, footer excluded
         assert len(inapplicable_sections) >= 5
 
         # Excluded fields should be the majority
@@ -270,7 +278,9 @@ class TestPortfolioProfileBoundary:
 
     def test_empty_schema_produces_all_inapplicable(self):
         """Schema with no fields → all portfolio sections inapplicable."""
-        schema = WebsiteFormSchema(source_url="https://empty.com", sections=[], fields=[])
+        schema = WebsiteFormSchema(
+            source_url="https://empty.com", sections=[], fields=[]
+        )
         result = self.profile.adapt(schema)
         assert all(not s.is_applicable for s in result.sections)
         assert result.mapped_fields == 0

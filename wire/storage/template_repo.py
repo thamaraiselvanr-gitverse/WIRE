@@ -1,7 +1,9 @@
-import os
 import json
+import os
 import shutil
 import time
+from typing import Any, Dict, Optional
+
 import structlog
 
 logger = structlog.get_logger(__name__)
@@ -14,7 +16,7 @@ class TemplateRepository:
     for instant retrieval without re-crawling.
     """
 
-    def __init__(self, repo_dir: str = "templates"):
+    def __init__(self, repo_dir: str = "templates") -> None:
         self.repo_dir = repo_dir
         self.index_file = os.path.join(repo_dir, "index.json")
         os.makedirs(repo_dir, exist_ok=True)
@@ -31,7 +33,9 @@ class TemplateRepository:
         with open(self.index_file, "w", encoding="utf-8") as f:
             json.dump(self.index, f, indent=2)
 
-    def store(self, url: str, source_dir: str, metadata: dict | None = None) -> str:
+    def store(
+        self, url: str, source_dir: str, metadata: Optional[Dict[str, Any]] = None
+    ) -> str:
         """Cache a reconstruction as a template entry."""
         import hashlib
 
@@ -61,5 +65,5 @@ class TemplateRepository:
             return path
         return None
 
-    def list_templates(self) -> dict:
-        return self.index["templates"]
+    def list_templates(self) -> Dict[str, Any]:
+        return self.index["templates"]  # type: ignore[no-any-return]

@@ -1,9 +1,20 @@
-from sqlalchemy import Column, Integer, String, Boolean, DateTime, ForeignKey, Float
+from sqlalchemy import (
+    Boolean,
+    Column,
+    DateTime,
+    Float,
+    ForeignKey,
+    Integer,
+    String,
+    Text,
+)
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
+
 from .database import Base
 
-class User(Base):
+
+class User(Base):  # type: ignore[misc]
     __tablename__ = "users"
 
     id = Column(Integer, primary_key=True, index=True)
@@ -16,11 +27,34 @@ class User(Base):
     projects = relationship("Project", back_populates="owner")
 
 
-class Project(Base):
+class RefreshToken(Base):  # type: ignore[misc]
+    """A rotating, revocable refresh token (stored hashed, never raw).
+
+    Access tokens are short-lived; these let clients stay signed in while
+    giving the server a revocation path (logout, compromise response).
+    Single-use: consuming one revokes it and mints a successor.
+    """
+
+    __tablename__ = "refresh_tokens"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    token_hash = Column(String(64), unique=True, index=True, nullable=False)
+    expires_at = Column(DateTime(timezone=True), nullable=False)
+    revoked = Column(Boolean, default=False, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class Project(Base):  # type: ignore[misc]
     __tablename__ = "projects"
 
     id = Column(Integer, primary_key=True, index=True)
     url = Column(String, index=True, nullable=False)
+    # Output-directory name for this project's run (``project_<id>``), set at
+    # enqueue time. Isolates artifacts per project: two users reconstructing
+    # the same domain must never share a run directory. Nullable only for
+    # rows created before this column existed (legacy domain-named runs).
+    run_id = Column(String(64), nullable=True)
     status = Column(String, default="pending")  # pending, running, completed, failed
     fidelity_score = Column(Float, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
@@ -31,12 +65,45 @@ class Project(Base):
     template = relationship("TemplateMeta", back_populates="project", uselist=False)
 
 
-class TemplateMeta(Base):
+class ReconstructionJob(Base):  # type: ignore[misc]
+    """A durable, persisted unit of reconstruction work.
+
+    Replaces fire-and-forget background tasks: jobs survive restarts, can be
+    claimed by a worker, and are retried on failure until ``max_attempts``.
+    """
+
+    __tablename__ = "reconstruction_jobs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    project_id = Column(Integer, ForeignKey("projects.id"), nullable=False, index=True)
+    url = Column(String, nullable=False)
+    # pending -> running -> completed | failed  (failed only after max_attempts)
+    status = Column(String, default="pending", index=True, nullable=False)
+    attempts = Column(Integer, default=0, nullable=False)
+    max_attempts = Column(Integer, default=3, nullable=False)
+    error = Column(Text, nullable=True)
+    # Set on claim; result writes are guarded by it so a worker whose job was
+    # requeued as stale (and re-claimed elsewhere) cannot double-write.
+    claim_token = Column(String(32), nullable=True)
+    # Refreshed periodically by the running worker; stale recovery keys off
+    # this (falling back to started_at), so a long-but-alive run isn't
+    # requeued while a crashed worker's job is.
+    heartbeat_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    started_at = Column(DateTime(timezone=True), nullable=True)
+    updated_at = Column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
+class TemplateMeta(Base):  # type: ignore[misc]
     __tablename__ = "templates"
 
-    id = Column(String, primary_key=True)  # Cryptographic ID from our pipeline e.g. 13dc44d78d8e
+    id = Column(
+        String, primary_key=True
+    )  # Cryptographic ID from our pipeline e.g. 13dc44d78d8e
     project_id = Column(Integer, ForeignKey("projects.id"))
     tags = Column(String, nullable=True)  # JSON string of tags
     file_path = Column(String, nullable=False)
-    
+
     project = relationship("Project", back_populates="template")

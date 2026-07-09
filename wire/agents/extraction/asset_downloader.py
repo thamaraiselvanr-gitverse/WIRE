@@ -1,158 +1,625 @@
+import asyncio
+import hashlib
+import json
 import os
+import random
+import re
 import urllib.parse
-from bs4 import BeautifulSoup
+from typing import Any, Awaitable, Callable, Dict, List, Optional
+
 import httpx
 import structlog
-import re
-import asyncio
+from bs4 import BeautifulSoup
+
+from wire.utils.url_guard import is_disallowed_subresource
 
 logger = structlog.get_logger(__name__)
 
 URL_REGEX = re.compile(r"url\(\s*['\"]?(.*?)['\"]?\s*\)")
+# @import url("x.css") | @import 'x.css', with optional media/layer conditions.
+IMPORT_REGEX = re.compile(
+    r"""@import\s+(?:url\(\s*['\"]?(?P<u>[^'\")]+)['\"]?\s*\)"""
+    r"""|['\"](?P<s>[^'\"]+)['\"])(?P<cond>[^;]*);""",
+    re.IGNORECASE,
+)
+
+
+_UNFETCHABLE_SCHEMES = ("javascript:", "mailto:", "tel:", "about:", "blob:")
+
+
+def _is_unfetchable(url: str) -> bool:
+    """URLs that must never be fetched: in-page fragments and non-HTTP schemes."""
+    u = url.strip().lower()
+    return u.startswith("#") or u.startswith(_UNFETCHABLE_SCHEMES)
+
 
 class AssetDownloader:
-    def __init__(self):
-        self.client = httpx.AsyncClient()
+    # Transient failures worth retrying: rate limiting and server errors.
+    RETRY_STATUSES = frozenset({429, 500, 502, 503, 504})
+    MAX_RETRIES = 3
+    BACKOFF_BASE = 0.5  # seconds; grows as BACKOFF_BASE * 2**attempt
+    MAX_BACKOFF = 8.0
 
-    async def download_assets(self, page_url: str, html_content: str, asset_dir: str) -> tuple[str, list[str]]:
-        soup = BeautifulSoup(html_content, 'html.parser')
-        downloaded_assets = []
-        
-        async def fetch_and_save(orig_url: str, asset_type: str, source_url: str = None) -> str:
-            if orig_url.startswith('data:'):
+    def __init__(self) -> None:
+        self.client = httpx.AsyncClient()
+        # Guards against @import cycles within a single download_assets run.
+        self._seen_css_imports: set[str] = set()
+        # Per-run dedup caches: the same URL is fetched once, and identical
+        # bytes served from *different* URLs map to one local file.
+        self._url_to_local: Dict[str, str] = {}
+        self._content_hash_to_local: Dict[str, str] = {}
+
+    async def _fetch(self, url: str) -> Optional[httpx.Response]:
+        """GET with retry + exponential backoff for transient failures.
+
+        Retries network errors and rate-limit/server-error statuses
+        (429/5xx), honoring a numeric ``Retry-After`` header when present, with
+        jittered exponential backoff. Permanent responses (2xx, 404, 403, …) are
+        returned immediately for the caller to handle; ``None`` means every
+        attempt raised.
+        """
+        response: Optional[httpx.Response] = None
+        for attempt in range(self.MAX_RETRIES + 1):
+            try:
+                response = await self.client.get(url, follow_redirects=True)
+            except Exception as e:
+                response = None
+                if attempt == self.MAX_RETRIES:
+                    logger.warning("asset_fetch_error", url=url, error=str(e))
+            else:
+                if response.status_code not in self.RETRY_STATUSES:
+                    return response
+                if attempt == self.MAX_RETRIES:
+                    logger.warning(
+                        "asset_fetch_giving_up",
+                        url=url,
+                        status=response.status_code,
+                    )
+            if attempt < self.MAX_RETRIES:
+                await asyncio.sleep(self._retry_delay(attempt, response))
+        return response
+
+    def _retry_delay(self, attempt: int, response: Optional[httpx.Response]) -> float:
+        """Backoff before the next attempt: a numeric ``Retry-After`` wins,
+        else jittered exponential backoff capped at ``MAX_BACKOFF``."""
+        if response is not None:
+            retry_after = response.headers.get("Retry-After", "")
+            try:
+                return float(min(float(retry_after), self.MAX_BACKOFF))
+            except ValueError:
+                pass  # HTTP-date form isn't parsed; fall back to backoff.
+        delay: float = min(self.BACKOFF_BASE * (2**attempt), self.MAX_BACKOFF)
+        return delay + random.uniform(0, delay * 0.25)
+
+    async def download_assets(
+        self, page_url: str, html_content: str, asset_dir: str
+    ) -> tuple[str, list[str]]:
+        soup = BeautifulSoup(html_content, "html.parser")
+        downloaded_assets: List[str] = []
+        self._seen_css_imports = set()
+        self._url_to_local = {}
+        self._content_hash_to_local = {}
+
+        # A <base href> retargets every relative URL on the page; resolve
+        # against it instead of the document URL when present.
+        base_tag = soup.find("base", href=True)
+        base_url = (
+            urllib.parse.urljoin(page_url, str(base_tag["href"]))
+            if base_tag
+            else page_url
+        )
+
+        async def fetch_and_save(
+            orig_url: str, asset_type: str, source_url: Optional[str] = None
+        ) -> str:
+            if orig_url.startswith("data:") or _is_unfetchable(orig_url):
                 return orig_url
-                
-            base_reference_url = source_url if source_url else page_url
+
+            base_reference_url = source_url if source_url else base_url
             full_url = urllib.parse.urljoin(base_reference_url, orig_url)
+
+            # Sub-resource SSRF guard: a (possibly attacker-controlled) page must
+            # not make the server fetch an internal address via an asset URL.
+            if is_disallowed_subresource(full_url):
+                logger.warning("asset_ssrf_blocked", url=full_url)
+                return orig_url
+
+            # The same URL referenced repeatedly (logos, repeated icons) is
+            # fetched exactly once per run.
+            if full_url in self._url_to_local:
+                return self._url_to_local[full_url]
+
             parsed_url = urllib.parse.urlparse(full_url)
             filename = os.path.basename(parsed_url.path) or "index"
-            
-            if not filename.endswith(('.css', '.js', '.png', '.jpg', '.jpeg', '.gif', '.svg', '.webp', '.woff', '.woff2', '.ttf', '.eot')):
-                ext_map = {'link': '.css', 'script': '.js', 'img': '.png', 'bg': '.png'}
-                filename += ext_map.get(asset_type, '')
-                
+
+            if not filename.endswith(
+                (
+                    ".css",
+                    ".js",
+                    ".png",
+                    ".jpg",
+                    ".jpeg",
+                    ".gif",
+                    ".svg",
+                    ".webp",
+                    ".avif",
+                    ".ico",
+                    ".woff",
+                    ".woff2",
+                    ".ttf",
+                    ".eot",
+                    ".mp4",
+                    ".webm",
+                    ".ogg",
+                    ".ogv",
+                    ".mov",
+                    ".m4v",
+                    ".mp3",
+                    ".wav",
+                    ".m4a",
+                    ".vtt",
+                    ".webmanifest",
+                )
+            ):
+                ext_map = {"link": ".css", "script": ".js", "img": ".png", "bg": ".png"}
+                filename += ext_map.get(asset_type, "")
+
             # append hash to avoid filename collision
             safe_name = f"{hash(full_url)}_{filename}"
             local_path = os.path.join(asset_dir, safe_name)
-            
+
             try:
-                response = await self.client.get(full_url, follow_redirects=True)
-                if response.status_code == 200:
+                response = await self._fetch(full_url)
+                if response is not None and response.status_code == 200:
                     content_to_save = response.content
-                    
+                    is_css = asset_type == "link" and filename.endswith(".css")
+                    is_manifest = filename.endswith((".webmanifest", ".json"))
+                    is_rewritten = is_css or is_manifest
+                    digest = hashlib.sha256(content_to_save).hexdigest()
+
+                    # Identical bytes served from a different URL (CDN mirrors,
+                    # duplicated uploads) reuse the already-saved file. CSS and
+                    # manifests are exempt: their rewritten refs depend on the
+                    # source URL.
+                    if not is_rewritten:
+                        dup = self._content_hash_to_local.get(digest)
+                        if dup is not None:
+                            self._url_to_local[full_url] = dup
+                            return dup
+
                     # If it's a CSS file, parse it for nested urls
-                    if asset_type == 'link' and filename.endswith('.css'):
+                    if is_css:
                         css_text = response.text
-                        css_text = await self._process_css_urls(css_text, full_url, asset_dir, downloaded_assets)
-                        content_to_save = css_text.encode('utf-8')
-                        
+                        css_text = await self._process_css_urls(
+                            css_text, full_url, asset_dir, downloaded_assets
+                        )
+                        content_to_save = css_text.encode("utf-8")
+                    elif is_manifest:
+                        # A web-app manifest references icons/screenshots by
+                        # URL; localize them so the clone's manifest works.
+                        content_to_save = (
+                            await self._localize_manifest(
+                                response.text, full_url, fetch_and_save
+                            )
+                        ).encode("utf-8")
+
                     with open(local_path, "wb") as f:
                         f.write(content_to_save)
                     downloaded_assets.append(local_path)
-                    
+
                     # If this was called from inside a CSS file, the path relative to index.html is 'assets/...'
-                    return f"assets/{safe_name}"
+                    local_ref = f"assets/{safe_name}"
+                    self._url_to_local[full_url] = local_ref
+                    if not is_rewritten:
+                        self._content_hash_to_local[digest] = local_ref
+                    return local_ref
             except Exception as e:
                 logger.warning("asset_download_failed", url=full_url, error=str(e))
-            
+
             return orig_url
-            
+
         # Helper to process CSS text and replace url()
         async def process_css_text(css_text: str, base_url: str) -> str:
-            return await self._process_css_urls(css_text, base_url, asset_dir, downloaded_assets)
+            return await self._process_css_urls(
+                css_text, base_url, asset_dir, downloaded_assets
+            )
 
-        self._process_css_urls_proxy = fetch_and_save 
+        self._process_css_urls_proxy = fetch_and_save
+
+        async def rewrite_srcset(value: str, asset_type: str) -> str:
+            """Localize each candidate in a ``srcset`` list, keeping descriptors.
+
+            A ``srcset`` is ``url [descriptor]`` entries joined by commas, e.g.
+            ``a.jpg 1x, b.jpg 2x`` or ``a.jpg 400w, b.jpg 800w``.
+            """
+            out = []
+            for candidate in value.split(","):
+                candidate = candidate.strip()
+                if not candidate:
+                    continue
+                bits = candidate.split(None, 1)
+                url = bits[0]
+                descriptor = f" {bits[1]}" if len(bits) > 1 else ""
+                if url.startswith("data:"):
+                    out.append(f"{url}{descriptor}")
+                else:
+                    new_url = await fetch_and_save(url, asset_type)
+                    out.append(f"{new_url}{descriptor}")
+            return ", ".join(out)
 
         # 1. External CSS
-        for tag in soup.find_all('link', rel='stylesheet'):
-            if tag.get('href'):
-                new_href = await fetch_and_save(tag['href'], 'link')
-                tag['href'] = new_href
-                if tag.has_attr('crossorigin'):
-                    del tag['crossorigin']
-                if tag.has_attr('integrity'):
-                    del tag['integrity']
-                
+        for tag in soup.find_all("link", rel="stylesheet"):
+            if tag.get("href"):
+                new_href = await fetch_and_save(str(tag["href"]), "link")
+                tag["href"] = new_href
+                if tag.has_attr("crossorigin"):
+                    del tag["crossorigin"]
+                if tag.has_attr("integrity"):
+                    del tag["integrity"]
+
         # 2. External JS
-        for tag in soup.find_all('script', src=True):
-            if tag.get('src'):
-                new_src = await fetch_and_save(tag['src'], 'script')
-                tag['src'] = new_src
-                if tag.has_attr('crossorigin'):
-                    del tag['crossorigin']
-                if tag.has_attr('integrity'):
-                    del tag['integrity']
-                
+        for tag in soup.find_all("script", src=True):
+            if tag.get("src"):
+                new_src = await fetch_and_save(str(tag["src"]), "script")
+                tag["src"] = new_src
+                if tag.has_attr("crossorigin"):
+                    del tag["crossorigin"]
+                if tag.has_attr("integrity"):
+                    del tag["integrity"]
+
         # 3. Images
-        for tag in soup.find_all('img', src=True):
-            if tag.get('src'):
-                new_src = await fetch_and_save(tag['src'], 'img')
-                tag['src'] = new_src
-                
+        for tag in soup.find_all("img", src=True):
+            if tag.get("src"):
+                new_src = await fetch_and_save(str(tag["src"]), "img")
+                tag["src"] = new_src
+
+        # 3b. Responsive-image srcset + lazy-loading data attributes on <img>.
+        for tag in soup.find_all("img"):
+            if tag.get("srcset"):
+                tag["srcset"] = await rewrite_srcset(str(tag["srcset"]), "img")
+            if tag.get("data-srcset"):
+                tag["data-srcset"] = await rewrite_srcset(
+                    str(tag["data-srcset"]), "img"
+                )
+            for attr in ("data-src", "data-original", "data-lazy-src", "data-fallback"):
+                if tag.get(attr):
+                    tag[attr] = await fetch_and_save(str(tag[attr]), "img")
+
+        # 3c. <picture>/<video>/<audio> <source> variants (srcset or src).
+        for tag in soup.find_all("source"):
+            if tag.get("srcset"):
+                tag["srcset"] = await rewrite_srcset(str(tag["srcset"]), "img")
+            if tag.get("src"):
+                tag["src"] = await fetch_and_save(str(tag["src"]), "media")
+
+        # 3d. Media elements: <video>/<audio> src, poster image, <track> src.
+        for tag in soup.find_all(["video", "audio"]):
+            if tag.get("src"):
+                tag["src"] = await fetch_and_save(str(tag["src"]), "media")
+            if tag.get("poster"):
+                tag["poster"] = await fetch_and_save(str(tag["poster"]), "img")
+        for tag in soup.find_all("track", src=True):
+            tag["src"] = await fetch_and_save(str(tag["src"]), "media")
+
+        # 3e. Icons, favicons, and web-app manifest.
+        icon_rels = {
+            "icon",
+            "shortcut icon",
+            "apple-touch-icon",
+            "apple-touch-icon-precomposed",
+            "mask-icon",
+            "manifest",
+        }
+        for tag in soup.find_all("link", href=True):
+            rels = {r.lower() for r in (tag.get("rel") or [])}
+            if rels & icon_rels:
+                tag["href"] = await fetch_and_save(str(tag["href"]), "icon")
+
+        # 3e-bis. Resource hints that reference real files: <link rel=preload/
+        # prefetch/modulepreload> would point at dead URLs in the clone.
+        # DNS-level hints (dns-prefetch/preconnect) reference origins, not
+        # files, and are left alone.
+        preload_as_map = {
+            "style": "link",
+            "script": "script",
+            "image": "img",
+            "font": "font",
+        }
+        for tag in soup.find_all("link", href=True):
+            rels = {r.lower() for r in (tag.get("rel") or [])}
+            if "modulepreload" in rels:
+                tag["href"] = await fetch_and_save(str(tag["href"]), "script")
+            elif rels & {"preload", "prefetch"}:
+                as_type = str(tag.get("as") or "").lower()
+                asset_type = preload_as_map.get(as_type, "media")
+                tag["href"] = await fetch_and_save(str(tag["href"]), asset_type)
+                if tag.has_attr("integrity"):
+                    del tag["integrity"]
+
+        # 3f. Social-preview images referenced from <meta content="...">
+        # (og:image, twitter:image, msapplication tile, schema.org image).
+        meta_image_keys = {
+            "og:image",
+            "og:image:url",
+            "og:image:secure_url",
+            "twitter:image",
+            "twitter:image:src",
+            "msapplication-tileimage",
+            "image",
+        }
+        for tag in soup.find_all("meta", content=True):
+            key = str(
+                tag.get("property") or tag.get("name") or tag.get("itemprop") or ""
+            ).lower()
+            if key in meta_image_keys:
+                tag["content"] = await fetch_and_save(str(tag["content"]), "img")
+
+        # 3g. SVG sprite references: <use href="sprite.svg#icon"> pulls a symbol
+        # from an external file that must be localized (the #fragment is kept).
+        for tag in soup.find_all("use"):
+            ref_raw = tag.get("href") or tag.get("xlink:href")
+            ref = str(ref_raw) if ref_raw else ""
+            if ref and "#" in ref and not ref.startswith("#"):
+                file_part, frag = ref.split("#", 1)
+                local = await fetch_and_save(file_part, "img")
+                attr = "href" if tag.get("href") else "xlink:href"
+                tag[attr] = f"{local}#{frag}"
+
         # 4. Inline <style> tags
-        for tag in soup.find_all('style'):
+        for tag in soup.find_all("style"):
             if tag.string:
-                new_css = await process_css_text(tag.string, page_url)
-                tag.string.replace_with(new_css)
-                
+                new_css = await process_css_text(str(tag.string), base_url)
+                tag.string.replace_with(new_css)  # type: ignore[attr-defined]
+
         # 5. Inline style= attributes
         for tag in soup.find_all(style=True):
-            if tag.get('style'):
-                new_style = await process_css_text(tag['style'], page_url)
-                tag['style'] = new_style
-                
+            if tag.get("style"):
+                new_style = await process_css_text(str(tag["style"]), base_url)
+                tag["style"] = new_style
+
+        # The clone is always written to disk as UTF-8; a stale declared
+        # charset (e.g. iso-8859-1) would make browsers mis-decode it.
+        self._normalize_charset(soup)
+
         return str(soup), downloaded_assets
 
-    async def _process_css_urls(self, css_text: str, source_url: str, asset_dir: str, downloaded_assets: list) -> str:
+    @staticmethod
+    async def _localize_manifest(
+        manifest_text: str,
+        manifest_url: str,
+        fetch: Callable[..., Awaitable[str]],
+    ) -> str:
+        """Localize icon/screenshot URLs inside a web-app manifest.
+
+        Manifest ``src`` values resolve relative to the manifest's own URL.
+        The saved manifest lives in ``assets/`` next to the downloaded icons,
+        so localized refs are written as bare filenames. Non-JSON or
+        unexpected shapes are passed through untouched.
+        """
+        try:
+            data = json.loads(manifest_text)
+        except (ValueError, TypeError):
+            return manifest_text
+        if not isinstance(data, dict):
+            return manifest_text
+
+        async def _localize_entries(entries: Any) -> None:
+            if not isinstance(entries, list):
+                return
+            for entry in entries:
+                if not isinstance(entry, dict):
+                    continue
+                src = entry.get("src")
+                if not isinstance(src, str) or not src or src.startswith("data:"):
+                    continue
+                local = await fetch(src, "img", source_url=manifest_url)
+                if local.startswith("assets/"):
+                    entry["src"] = local.split("/", 1)[1]
+
+        await _localize_entries(data.get("icons"))
+        await _localize_entries(data.get("screenshots"))
+        for shortcut in data.get("shortcuts") or []:
+            if isinstance(shortcut, dict):
+                await _localize_entries(shortcut.get("icons"))
+        return json.dumps(data)
+
+    @staticmethod
+    def _normalize_charset(soup: BeautifulSoup) -> None:
+        """Align the document's declared charset with the UTF-8 file we save.
+
+        Rewrites ``<meta charset>`` and ``<meta http-equiv="Content-Type">``
+        declarations to UTF-8, and inserts a ``<meta charset="utf-8">`` when a
+        ``<head>`` exists but no declaration does (non-ASCII text would
+        otherwise be at the mercy of browser sniffing for local files).
+        """
+        declared = False
+        for meta in soup.find_all("meta"):
+            if meta.get("charset"):
+                meta["charset"] = "utf-8"
+                declared = True
+            elif str(meta.get("http-equiv") or "").lower() == "content-type":
+                content = str(meta.get("content") or "")
+                new_content = re.sub(
+                    r"charset\s*=\s*[^;\s]+",
+                    "charset=utf-8",
+                    content,
+                    flags=re.IGNORECASE,
+                )
+                if new_content == content and "charset" not in content.lower():
+                    new_content = (content.rstrip("; ") + "; charset=utf-8").lstrip(
+                        "; "
+                    )
+                meta["content"] = new_content
+                declared = True
+        if not declared and soup.head is not None:
+            tag = soup.new_tag("meta")
+            tag["charset"] = "utf-8"
+            soup.head.insert(0, tag)
+
+    async def _process_css_imports(
+        self,
+        css_text: str,
+        source_url: str,
+        asset_dir: str,
+        downloaded_assets: List[Any],
+    ) -> str:
+        """Fetch, recursively localize, and rewrite ``@import`` statements.
+
+        Each imported stylesheet is downloaded as CSS (not an opaque blob),
+        run back through ``_process_css_urls`` so its own ``url()`` refs and
+        nested imports are localized too, then saved and the ``@import``
+        rewritten to the local copy. Bare-string imports (``@import "x.css"``)
+        are handled as well as ``@import url(...)``. Import cycles are guarded.
+        """
+        imports = list(IMPORT_REGEX.finditer(css_text))
+        if not imports:
+            return css_text
+
+        for match in imports:
+            href = match.group("u") or match.group("s")
+            if not href or href.startswith("data:"):
+                continue
+            try:
+                full_url = urllib.parse.urljoin(source_url, href)
+                if is_disallowed_subresource(full_url):
+                    logger.warning("css_import_ssrf_blocked", url=full_url)
+                    continue
+                if full_url in self._seen_css_imports:
+                    continue
+                self._seen_css_imports.add(full_url)
+
+                response = await self._fetch(full_url)
+                if response is None or response.status_code != 200:
+                    continue
+
+                nested_css = await self._process_css_urls(
+                    response.text, full_url, asset_dir, downloaded_assets
+                )
+
+                filename = os.path.basename(urllib.parse.urlparse(full_url).path)
+                if not filename.endswith(".css"):
+                    filename = (filename or "import") + ".css"
+                safe_name = f"{hash(full_url)}_{filename}"
+                with open(os.path.join(asset_dir, safe_name), "wb") as f:
+                    f.write(nested_css.encode("utf-8"))
+                downloaded_assets.append(os.path.join(asset_dir, safe_name))
+
+                # A CSS file lives inside assets/ alongside its imports; the
+                # HTML/inline case needs the assets/ prefix.
+                local_ref = (
+                    safe_name if source_url.endswith(".css") else f"assets/{safe_name}"
+                )
+                cond = match.group("cond").strip()
+                replacement = f'@import "{local_ref}"{" " + cond if cond else ""};'
+                css_text = css_text.replace(match.group(0), replacement)
+            except Exception as e:
+                logger.warning("css_import_failed", url=href, error=str(e))
+
+        return css_text
+
+    async def _process_css_urls(
+        self,
+        css_text: str,
+        source_url: str,
+        asset_dir: str,
+        downloaded_assets: List[Any],
+    ) -> str:
+        # Resolve @import chains first so imported sheets are localized as CSS
+        # rather than downloaded as opaque blobs by the url() pass below.
+        css_text = await self._process_css_imports(
+            css_text, source_url, asset_dir, downloaded_assets
+        )
+
         # Find all url(...)
         matches = URL_REGEX.findall(css_text)
         if not matches:
             return css_text
-            
+
         unique_urls = list(set(matches))
         for old_url in unique_urls:
-            # Avoid processing data URIs
-            if old_url.startswith('data:'):
+            # Skip data URIs, in-page SVG fragment refs (url(#filter)), and
+            # non-fetchable schemes — fetching those would 404 or error.
+            if old_url.startswith("data:") or _is_unfetchable(old_url):
                 continue
-            
+
             # Use fetch_and_save indirectly. Note: The return of fetch_and_save is `assets/name`
             # which is relative to index.html. CSS files in `assets/` relative to `assets/` need adjustment.
             # But here `fetch_and_save` returns `assets/name`. Since we rewrite HTML index.html,
             # For CSS file saving, we are rewriting the same `assets/name`. Wait...
             # If the CSS file itself is in `assets/`, then `url(assets/name)` is broken. It should be `url(name)`.
-            # However, for simplicity of Phase 1MVP, we put EVERYTHING in `assets/` and the downloaded CSS file 
-            # uses `url(name_of_asset_in_same_folder)`. 
-            
+            # However, for simplicity of Phase 1MVP, we put EVERYTHING in `assets/` and the downloaded CSS file
+            # uses `url(name_of_asset_in_same_folder)`.
+
             # Let's cleanly fetch it
             try:
                 full_url = urllib.parse.urljoin(source_url, old_url)
+                if is_disallowed_subresource(full_url):
+                    logger.warning("css_asset_ssrf_blocked", url=full_url)
+                    continue
+
+                # Already downloaded this run (from HTML or another sheet):
+                # rewrite to the existing local file without refetching.
+                cached = self._url_to_local.get(full_url)
+                if cached is not None:
+                    name = cached.split("/")[-1]
+                    css_text = css_text.replace(
+                        old_url, name if source_url.endswith(".css") else cached
+                    )
+                    continue
+
                 parsed_url = urllib.parse.urlparse(full_url)
                 filename = os.path.basename(parsed_url.path) or "index"
-                if not filename.endswith(('.png', '.jpg', '.jpeg', '.gif', '.svg', '.webp', '.woff', '.woff2', '.ttf', '.eot')):
+                if not filename.endswith(
+                    (
+                        ".png",
+                        ".jpg",
+                        ".jpeg",
+                        ".gif",
+                        ".svg",
+                        ".webp",
+                        ".woff",
+                        ".woff2",
+                        ".ttf",
+                        ".eot",
+                    )
+                ):
                     filename += ".png"
                 safe_name = f"{hash(full_url)}_{filename}"
                 local_path = os.path.join(asset_dir, safe_name)
-                
-                response = await self.client.get(full_url, follow_redirects=True)
-                if response.status_code == 200:
+
+                response = await self._fetch(full_url)
+                if response is not None and response.status_code == 200:
+                    # Identical bytes under a different URL: reuse the copy.
+                    digest = hashlib.sha256(response.content).hexdigest()
+                    dup = self._content_hash_to_local.get(digest)
+                    if dup is not None:
+                        self._url_to_local[full_url] = dup
+                        name = dup.split("/")[-1]
+                        css_text = css_text.replace(
+                            old_url, name if source_url.endswith(".css") else dup
+                        )
+                        continue
+
                     with open(local_path, "wb") as f:
                         f.write(response.content)
                     downloaded_assets.append(local_path)
-                    
+                    self._url_to_local[full_url] = f"assets/{safe_name}"
+                    self._content_hash_to_local[digest] = f"assets/{safe_name}"
+
                     # Determine replacement:
                     # If this source_url is a CSS file inside `assets/`, we just need the filename.
                     # If it's inline in HTML, we need `assets/filename`.
                     # To be perfectly safe, since we map all assets into `output/domain/assets/`,
-                    # if the source was index.html it needs `assets/...`. 
+                    # if the source was index.html it needs `assets/...`.
                     # If the source was `.css`, it's already in `assets/` so it needs just `...`.
-                    
-                    if source_url.endswith('.css'):
+
+                    if source_url.endswith(".css"):
                         replacement = safe_name
                     else:
                         replacement = f"assets/{safe_name}"
-                        
+
                     css_text = css_text.replace(old_url, replacement)
             except Exception as e:
                 logger.warning("css_asset_download_failed", url=old_url, error=str(e))
-                
+
         return css_text

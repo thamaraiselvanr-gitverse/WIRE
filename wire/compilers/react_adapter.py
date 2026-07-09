@@ -1,6 +1,14 @@
 import structlog
-from wire.schema.canonical import CanonicalDesignSchema, ComponentNode
+
 from wire.compilers.sanitizer import HtmlSanitizer
+from wire.compilers.style_emission import (
+    collect_generated_styles,
+    count_inline_styles,
+    merge_class,
+    mint_dedup_classes,
+    sanitized_declarations,
+)
+from wire.schema.canonical import CanonicalDesignSchema, ComponentNode
 
 logger = structlog.get_logger(__name__)
 
@@ -23,16 +31,45 @@ class ReactAdapter:
     def compile(self, cids: CanonicalDesignSchema) -> str:
         logger.info("compiling_cids_to_react", url=cids.url)
 
+        # Responsive/pseudo/global styles that inline style objects cannot
+        # express are emitted as a <style> element; each affected node gains a
+        # generated class recorded in self._class_map.
+        self._class_map, css = collect_generated_styles(
+            cids.root, getattr(cids, "global_styles", [])
+        )
+
+        # Repeated inline style objects are hoisted into shared classes (light
+        # DOM only; shadow content is rendered as a static string). The dedup
+        # rules go first so responsive @media rules still win their breakpoint.
+        freq = count_inline_styles(cids.root, include_shadow=False)
+        self._dedup_map, dedup_css = mint_dedup_classes(freq)
+        css = "\n".join(part for part in (dedup_css, css) if part)
+
         imports = "import React from 'react';\n\n"
-        component = self._render_component(cids.root, "App")
+        component = self._render_component(cids.root, "App", css)
 
         return imports + component
 
-    def _render_component(self, node: ComponentNode, component_name: str) -> str:
+    def _render_component(
+        self, node: ComponentNode, component_name: str, style_css: str = ""
+    ) -> str:
         lines = []
         lines.append(f"function {component_name}() {{")
         lines.append("  return (")
-        lines.append(self._render_jsx(node, indent=4))
+        if style_css:
+            escaped = (
+                style_css.replace("\\", "\\\\")
+                .replace("`", "\\`")
+                .replace("${", "\\${")
+            )
+            lines.append("    <>")
+            lines.append(
+                f"      <style dangerouslySetInnerHTML={{{{ __html: `{escaped}` }}}} />"
+            )
+            lines.append(self._render_jsx(node, indent=6))
+            lines.append("    </>")
+        else:
+            lines.append(self._render_jsx(node, indent=4))
         lines.append("  );")
         lines.append("}")
         lines.append(f"\nexport default {component_name};")
@@ -70,7 +107,7 @@ class ReactAdapter:
         attrs_str = (" " + " ".join(attrs_parts)) if attrs_parts else ""
 
         if not node.children and not node.text_content and not node.shadow_root:
-            if node.tag in ['img', 'br', 'hr', 'input', 'meta', 'link']:
+            if node.tag in ["img", "br", "hr", "input", "meta", "link"]:
                 return f"<{node.tag}{attrs_str}/>"
             return f"<{node.tag}{attrs_str}></{node.tag}>"
 
@@ -79,7 +116,10 @@ class ReactAdapter:
 
         if node.shadow_root:
             shadow_html = self._render_html_string(node.shadow_root)
-            children_str = f'<template shadowrootmode="open">{shadow_html}</template>' + children_str
+            children_str = (
+                f'<template shadowrootmode="open">{shadow_html}</template>'
+                + children_str
+            )
 
         if node.tag == "#shadow-root":
             return children_str
@@ -101,10 +141,20 @@ class ReactAdapter:
             html_str = "".join([self._render_html_string(c) for c in node.children])
             # Centralized HTML Sanitization on the generated shadow DOM template string
             sanitized_html = HtmlSanitizer.sanitize_html(html_str)
-            escaped_html = sanitized_html.replace('\\', '\\\\').replace('`', '\\`').replace('${', '\\${')
+            escaped_html = (
+                sanitized_html.replace("\\", "\\\\")
+                .replace("`", "\\`")
+                .replace("${", "\\${")
+            )
             return f'{prefix}<template shadowrootmode="open" dangerouslySetInnerHTML={{{{\n{prefix}  __html: `{escaped_html}`\n{prefix}}}}} />'
 
-        # Build props
+        # Build props. Combine the responsive/pseudo class with the dedup class
+        # (repeated inline styles hoisted to a shared class); a deduplicated node
+        # wears the class instead of an inline style object.
+        gen_class = getattr(self, "_class_map", {}).get(id(node))
+        dedup_class = getattr(self, "_dedup_map", {}).get(sanitized_declarations(node))
+        combined_class = merge_class(gen_class, dedup_class)
+        class_emitted = False
         props_parts = []
         for key, value in node.attributes.items():
             if key == "style":
@@ -115,9 +165,14 @@ class ReactAdapter:
                 if not HtmlSanitizer._is_safe_uri(value):
                     continue
             jsx_key = self._html_attr_to_jsx(key)
+            if key.lower() == "class":
+                value = merge_class(value, combined_class) or value
+                class_emitted = True
             props_parts.append(f'{jsx_key}="{value}"')
+        if combined_class and not class_emitted:
+            props_parts.append(f'className="{combined_class}"')
 
-        if node.styles:
+        if node.styles and not dedup_class:
             style_parts = []
             for k, v in node.styles.items():
                 sanitized_val = HtmlSanitizer._sanitize_style_string(v)
@@ -154,4 +209,3 @@ class ReactAdapter:
     def _css_to_camel(prop: str) -> str:
         parts = prop.split("-")
         return parts[0] + "".join(p.capitalize() for p in parts[1:])
-

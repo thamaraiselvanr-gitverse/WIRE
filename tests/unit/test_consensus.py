@@ -1,6 +1,8 @@
-import pytest
 from io import BytesIO
+
+import pytest
 from PIL import Image
+
 from wire.orchestrator.consensus import ConsensusValidator
 
 

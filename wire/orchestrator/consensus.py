@@ -1,20 +1,26 @@
+from typing import Any, Dict
+
 import structlog
-import hashlib
 
 logger = structlog.get_logger(__name__)
 
 
 class ConsensusValidator:
     """
-    Quorum-based validation for reconstruction fidelity.
-    Uses pairwise pixel-level comparison (VisualDiff) to evaluate consensus agreement.
+    Render-agreement utility: measures how consistently a set of renders agree
+    via pairwise pixel comparison (VisualDiff).
+
+    NOTE: comparing repeated renders of the *same* URL only measures render
+    determinism, not reconstruction fidelity — the pipeline now uses
+    ``VisualDiff.volatility_mask`` for dynamic-region detection instead. This
+    class remains a general-purpose agreement metric.
     """
 
-    def __init__(self, quorum_size: int = 3, threshold: float = 95.0):
+    def __init__(self, quorum_size: int = 3, threshold: float = 95.0) -> None:
         self.quorum_size = quorum_size
         self.threshold = threshold
 
-    async def validate(self, renders: list[bytes]) -> dict:
+    async def validate(self, renders: list[bytes]) -> Dict[str, Any]:
         """
         Compare multiple renders of the same page using pairwise pixel comparison.
         Returns consensus result with agreement score.
@@ -30,8 +36,9 @@ class ConsensusValidator:
                 "comparison_method": "pixel-based (color delta)",
             }
 
-        import tempfile
         import os
+        import tempfile
+
         from wire.validation.visual_diff import VisualDiff
 
         diff_engine = VisualDiff()
@@ -52,7 +59,9 @@ class ConsensusValidator:
             for i in range(len(temp_files)):
                 for j in range(i + 1, len(temp_files)):
                     try:
-                        res = diff_engine.compare_screenshots(temp_files[i], temp_files[j])
+                        res = diff_engine.compare_screenshots(
+                            temp_files[i], temp_files[j]
+                        )
                         sim = res["similarity_percent"]
                     except ValueError as e:
                         logger.warning("consensus_dimension_mismatch", error=str(e))
@@ -86,4 +95,3 @@ class ConsensusValidator:
                     os.unlink(path)
                 except OSError:
                     pass
-

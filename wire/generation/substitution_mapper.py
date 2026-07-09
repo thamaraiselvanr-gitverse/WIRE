@@ -1,7 +1,13 @@
-from typing import Dict, Any, List
-from wire.schema.submission_schema import SubmissionPayload, ContentSubstitution, SubstitutedValueRef, SubmittedValue, TextValue, ImageValue, UrlValue, RepeatableGroupValue
-from wire.schema.semantic_schema import FormField, SectionRole
+from typing import Any, List, Tuple
+
 from wire.schema.canonical import ComponentNode
+from wire.schema.submission_schema import (
+    ContentSubstitution,
+    RepeatableGroupValue,
+    SubmissionPayload,
+    SubstitutedValueRef,
+)
+
 
 class SubstitutionMapper:
     """
@@ -11,28 +17,23 @@ class SubstitutionMapper:
 
     @staticmethod
     def map(
-        cids_root: ComponentNode,
-        payload: SubmissionPayload,
-        form_schema: Any
+        cids_root: ComponentNode, payload: SubmissionPayload, form_schema: Any
     ) -> List[ContentSubstitution]:
         substitutions: List[ContentSubstitution] = []
 
         schema_fields = {f.field_id: f for f in form_schema.fields}
-        schema_groups = {g.group_id: g for g in getattr(form_schema, "repeatable_groups", [])}
+        schema_groups = {
+            g.group_id: g for g in getattr(form_schema, "repeatable_groups", [])
+        }
 
         # 1. Map top-level fields
         for field_id, submitted_val in payload.field_values.items():
             if field_id in schema_fields:
                 form_field = schema_fields[field_id]
-                
-                sub_type = "text_replace"
-                ref_type = "text"
-                
-                if form_field.field_type.value == "image":
-                    sub_type = "image_replace"
-                    ref_type = "image"
-                elif form_field.field_type.value == "url":
-                    ref_type = "url"
+
+                sub_type, ref_type = SubstitutionMapper._resolve_types(
+                    form_field.field_type.value
+                )
 
                 substitutions.append(
                     ContentSubstitution(
@@ -43,9 +44,21 @@ class SubstitutionMapper:
                         original_value=form_field.original_value,
                         substituted_value=SubstitutedValueRef(
                             type=ref_type,
-                            value=submitted_val.value
+                            value=getattr(submitted_val, "value", ""),
+                            extracted_text=getattr(
+                                submitted_val, "extracted_text", None
+                            ),
+                            alt_text=getattr(submitted_val, "alt_text", None),
+                            dominant_color=getattr(
+                                submitted_val, "dominant_color", None
+                            ),
+                            width=getattr(submitted_val, "width", None),
+                            height=getattr(submitted_val, "height", None),
+                            structure=getattr(
+                                submitted_val, "extracted_structure", None
+                            ),
                         ),
-                        substitution_type=sub_type
+                        substitution_type=sub_type,
                     )
                 )
 
@@ -56,24 +69,27 @@ class SubstitutionMapper:
                 original_count = group.instance_count
                 template_fields = {f.field_id: f for f in group.template_fields}
 
+                if not isinstance(submitted_val, RepeatableGroupValue):
+                    continue
                 for inst_idx, instance in enumerate(submitted_val.instances):
                     is_new_instance = inst_idx >= original_count
-                    
+
                     for f_id, val in instance.items():
                         if f_id in template_fields:
                             template_field = template_fields[f_id]
-                            
-                            sub_type = "repeatable_instance_add" if is_new_instance else (
-                                "image_replace" if template_field.field_type.value == "image" else "text_replace"
+
+                            base_sub_type, ref_type = SubstitutionMapper._resolve_types(
+                                template_field.field_type.value
                             )
-                            ref_type = "image" if template_field.field_type.value == "image" else (
-                                "url" if template_field.field_type.value == "url" else "text"
+                            sub_type = (
+                                "repeatable_instance_add"
+                                if is_new_instance
+                                else base_sub_type
                             )
 
                             # Estimate the path for existing repeat items by modifying the index
                             adjusted_path = SubstitutionMapper._adjust_path_index(
-                                template_field.cids_node_path,
-                                inst_idx
+                                template_field.cids_node_path, inst_idx
                             )
 
                             substitutions.append(
@@ -82,16 +98,44 @@ class SubstitutionMapper:
                                     slot_id=template_field.slot_id,
                                     cids_node_path=adjusted_path,
                                     section_role=template_field.section_role,
-                                    original_value=template_field.original_value if not is_new_instance else None,
+                                    original_value=(
+                                        template_field.original_value
+                                        if not is_new_instance
+                                        else None
+                                    ),
                                     substituted_value=SubstitutedValueRef(
                                         type=ref_type,
-                                        value=val.value
+                                        value=getattr(val, "value", ""),
+                                        extracted_text=getattr(
+                                            val, "extracted_text", None
+                                        ),
+                                        alt_text=getattr(val, "alt_text", None),
+                                        dominant_color=getattr(
+                                            val, "dominant_color", None
+                                        ),
+                                        width=getattr(val, "width", None),
+                                        height=getattr(val, "height", None),
+                                        structure=getattr(
+                                            val, "extracted_structure", None
+                                        ),
                                     ),
-                                    substitution_type=sub_type
+                                    substitution_type=sub_type,  # type: ignore[arg-type]
                                 )
                             )
 
         return substitutions
+
+    @staticmethod
+    def _resolve_types(field_type: str) -> Tuple[Any, ...]:
+        """Map a form field type to (substitution_type, substituted_ref_type)."""
+        mapping = {
+            "image": ("image_replace", "image"),
+            "video": ("media_replace", "video"),
+            "audio": ("media_replace", "audio"),
+            "document": ("document_replace", "document"),
+            "url": ("text_replace", "url"),
+        }
+        return mapping.get(field_type, ("text_replace", "text"))
 
     @staticmethod
     def _adjust_path_index(node_path: str, instance_idx: int) -> str:

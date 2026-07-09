@@ -1,17 +1,22 @@
 import asyncio
 import sys
+from typing import Any, Dict
+
 import uvicorn
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
+
 from wire.service import WireService
 
 app = FastAPI(title="WIRE Semantic Web Reconstructor")
 
+
 class ReconstructRequest(BaseModel):
     url: str
 
+
 @app.post("/api/reconstruct")
-async def reconstruct(request: ReconstructRequest):
+async def reconstruct(request: ReconstructRequest) -> Dict[str, Any]:
     service = WireService()
     try:
         score = await service.run(request.url)
@@ -19,7 +24,8 @@ async def reconstruct(request: ReconstructRequest):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-def main():
+
+def main() -> None:
     if len(sys.argv) > 1:
         if sys.argv[1] == "--server":
             print("Starting FastAPI server on port 8000...")
@@ -38,6 +44,7 @@ def main():
         print("Usage: wire <url> OR string '--server' to start the REST API")
         print("Starting FastAPI server on port 8000 as default...")
         uvicorn.run("wire.main:app", host="0.0.0.0", port=8000, reload=False)
+
 
 if __name__ == "__main__":
     main()

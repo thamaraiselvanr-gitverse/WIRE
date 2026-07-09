@@ -1,6 +1,14 @@
 import structlog
-from wire.schema.canonical import CanonicalDesignSchema, ComponentNode
+
 from wire.compilers.sanitizer import HtmlSanitizer
+from wire.compilers.style_emission import (
+    collect_generated_styles,
+    count_inline_styles,
+    merge_class,
+    mint_dedup_classes,
+    sanitized_declarations,
+)
+from wire.schema.canonical import CanonicalDesignSchema, ComponentNode
 
 logger = structlog.get_logger(__name__)
 
@@ -23,11 +31,28 @@ class VueAdapter:
     def compile(self, cids: CanonicalDesignSchema) -> str:
         logger.info("compiling_cids_to_vue", url=cids.url)
 
+        # Styles that inline :style bindings cannot express (@media, pseudo
+        # states, @font-face/@keyframes) go into a separate non-scoped <style>
+        # block; each affected node gains a generated class in self._class_map.
+        self._class_map, generated_css = collect_generated_styles(
+            cids.root, getattr(cids, "global_styles", [])
+        )
+
+        # Repeated inline :style bindings are hoisted into shared classes (light
+        # DOM only; shadow content stays inline). Dedup rules go first so
+        # responsive @media rules still win within their breakpoint.
+        freq = count_inline_styles(cids.root, include_shadow=False)
+        self._dedup_map, dedup_css = mint_dedup_classes(freq)
+        generated_css = "\n".join(part for part in (dedup_css, generated_css) if part)
+
         template = self._render_template(cids.root)
         script = self._render_script(cids)
         style = self._render_style(cids)
 
-        return f"<template>\n{template}\n</template>\n\n{script}\n\n{style}\n"
+        parts = [f"<template>\n{template}\n</template>", script, style]
+        if generated_css:
+            parts.append(f"<style>\n{generated_css}\n</style>")
+        return "\n\n".join(parts) + "\n"
 
     def _render_template(self, node: ComponentNode, indent: int = 2) -> str:
         prefix = " " * indent
@@ -41,9 +66,18 @@ class VueAdapter:
             return ""
 
         if tag == "#shadow-root":
-            children_str = "\n".join([self._render_template(c, indent + 2) for c in node.children])
+            children_str = "\n".join(
+                [self._render_template(c, indent + 2) for c in node.children]
+            )
             return f'{prefix}<template shadowrootmode="open">\n{children_str}\n{prefix}</template>'
 
+        # Combine the responsive/pseudo class with the dedup class (repeated
+        # inline styles hoisted to a shared class); a deduplicated node wears the
+        # class instead of an inline style binding.
+        gen_class = getattr(self, "_class_map", {}).get(id(node))
+        dedup_class = getattr(self, "_dedup_map", {}).get(sanitized_declarations(node))
+        combined_class = merge_class(gen_class, dedup_class)
+        class_emitted = False
         attrs_parts = []
         for key, value in node.attributes.items():
             if key == "style":
@@ -53,9 +87,14 @@ class VueAdapter:
             if key.lower() in {"href", "src", "action", "formaction"}:
                 if not HtmlSanitizer._is_safe_uri(value):
                     continue
+            if key.lower() == "class":
+                value = merge_class(value, combined_class) or value
+                class_emitted = True
             attrs_parts.append(f'{key}="{value}"')
+        if combined_class and not class_emitted:
+            attrs_parts.append(f'class="{combined_class}"')
 
-        if node.styles:
+        if node.styles and not dedup_class:
             style_parts = []
             for k, v in node.styles.items():
                 sanitized_val = HtmlSanitizer._sanitize_style_string(v)

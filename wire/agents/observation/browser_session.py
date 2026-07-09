@@ -1,17 +1,31 @@
+from typing import Any, Dict, Optional
+
 import structlog
-from playwright.async_api import async_playwright, Browser, BrowserContext, Page
-from wire.utils.config import get_config
+from playwright.async_api import (
+    Browser,
+    BrowserContext,
+    Page,
+    Playwright,
+    async_playwright,
+)
+
+from wire.agents.observation.auth_handler import AuthHandler
 from wire.agents.observation.stealth import StealthManager
+from wire.utils.config import get_config
 
 logger = structlog.get_logger(__name__)
 
+
 class BrowserSession:
-    def __init__(self):
+    def __init__(self, credentials: Optional[Dict[str, Any]] = None) -> None:
         self.config = get_config()
-        self.playwright = None
-        self.browser: Browser = None
-        self.context: BrowserContext = None
+        self.playwright: Optional[Playwright] = None
+        self.browser: Optional[Browser] = None
+        self.context: Optional[BrowserContext] = None
         self._is_active = False
+        # Optional operator-supplied auth (cookies/headers/storage) applied at
+        # context creation for capturing pages behind a login.
+        self.credentials = credentials
 
     async def start(self) -> None:
         logger.info("starting_playwright_session")
@@ -19,11 +33,15 @@ class BrowserSession:
         self.browser = await self.playwright.chromium.launch(
             headless=self.config.headless
         )
-        self.context = await self.browser.new_context(
-            user_agent=self.config.user_agent,
-            viewport={'width': 1920, 'height': 1080}
-        )
+        context_args = {
+            "user_agent": self.config.user_agent,
+            "viewport": {"width": 1920, "height": 1080},
+            **StealthManager.context_fingerprint(),
+        }
+        self.context = await self.browser.new_context(**context_args)
         await StealthManager.apply_stealth(self.context)
+        if self.credentials:
+            await AuthHandler.authenticate(self.context, self.credentials)
         await self.context.add_init_script("""
             const originalAttachShadow = Element.prototype.attachShadow;
             Element.prototype.attachShadow = function(init) {
@@ -34,16 +52,21 @@ class BrowserSession:
         """)
         self._is_active = True
 
-    async def wait_for_dom_stability(self, page: Page, timeout_ms: int = 5000, check_interval_ms: int = 300) -> None:
+    async def wait_for_dom_stability(
+        self, page: Page, timeout_ms: int = 5000, check_interval_ms: int = 300
+    ) -> None:
         logger.info("waiting_for_dom_stability", timeout=timeout_ms)
         import time
+
         max_wait = timeout_ms / 1000.0
         last_state = None
         t0 = time.time()
-        
+
         while time.time() - t0 < max_wait:
             try:
-                state = await page.evaluate("() => [document.body.innerHTML.length, document.querySelectorAll('*').length]")
+                state = await page.evaluate(
+                    "() => [document.body.innerHTML.length, document.querySelectorAll('*').length]"
+                )
                 if last_state == state:
                     logger.info("dom_stabilized", elapsed=round(time.time() - t0, 2))
                     break
@@ -52,22 +75,57 @@ class BrowserSession:
                 logger.warning("dom_stability_check_failed", error=str(e))
             await page.wait_for_timeout(check_interval_ms)
 
+    async def trigger_lazy_content(
+        self, page: Page, step_px: int = 800, max_steps: int = 40
+    ) -> None:
+        """Scroll through the full page height to fire lazy loaders.
+
+        IntersectionObserver-based lazy images, infinite-scroll sections, and
+        scroll-triggered animations only materialize once their viewport is
+        reached. Scrolling in steps (rather than jumping to the bottom) gives
+        each observer a chance to fire; we then return to the top so the
+        capture reflects the page's natural initial scroll position.
+        """
+        try:
+            height = await page.evaluate("() => document.body.scrollHeight")
+            steps = min(max_steps, max(1, int(height // step_px) + 1))
+            for i in range(1, steps + 1):
+                await page.evaluate(f"() => window.scrollTo(0, {i * step_px})")
+                await page.wait_for_timeout(120)
+            # Settle at the bottom so final-viewport observers fire too.
+            await page.evaluate("() => window.scrollTo(0, document.body.scrollHeight)")
+            await page.wait_for_timeout(250)
+            await page.evaluate("() => window.scrollTo(0, 0)")
+            await page.wait_for_timeout(150)
+            logger.info("lazy_content_triggered", scroll_height=height, steps=steps)
+        except Exception as e:
+            # Scrolling is best-effort; capture proceeds either way.
+            logger.warning("lazy_scroll_failed", error=str(e))
+
     async def capture_page(self, url: str) -> str:
         if not self._is_active:
             raise RuntimeError("Browser session not started")
 
         logger.info("capturing_page", url=url)
+        assert self.context is not None
         page: Page = await self.context.new_page()
         try:
-            await page.goto(url, wait_until="networkidle", timeout=self.config.timeout_ms)
-            
+            await page.goto(
+                url, wait_until="networkidle", timeout=self.config.timeout_ms
+            )
+
             # Run SPA detection check inline to see if we should wait for stability
             from wire.agents.observation.spa_detector import SPADetector
+
             detector = SPADetector()
             spa_result = await detector.detect(page)
             if spa_result.get("is_spa"):
                 logger.info("spa_detected_waiting_for_hydration")
                 await self.wait_for_dom_stability(page)
+
+            # Fire IntersectionObserver-based lazy loading (images, infinite
+            # scroll, scroll-reveal sections) before snapshotting the DOM.
+            await self.trigger_lazy_content(page)
 
             # Normalize modals and stuck DOM state before capture
             await page.evaluate("""
@@ -80,7 +138,7 @@ class BrowserSession:
                 document.body.style.overflow = '';
                 document.body.style.paddingRight = '';
             """)
-            
+
             content = await page.content()
             return content
         except Exception as e:
@@ -92,7 +150,10 @@ class BrowserSession:
     async def stop(self) -> None:
         if self._is_active:
             logger.info("stopping_playwright_session")
-            if self.context: await self.context.close()
-            if self.browser: await self.browser.close()
-            if self.playwright: await self.playwright.stop()
+            if self.context:
+                await self.context.close()
+            if self.browser:
+                await self.browser.close()
+            if self.playwright:
+                await self.playwright.stop()
             self._is_active = False

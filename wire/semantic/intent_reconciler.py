@@ -8,13 +8,13 @@ without a real slot_id.
 """
 
 import re
+from typing import Any, Dict, List, Optional
+
 import structlog
-from typing import Dict, List, Optional
 
 from wire.schema.semantic_schema import (
     SectionRole,
     WebsiteFormSchema,
-    FormField,
 )
 from wire.semantic.llm_guard import LLMGuard
 
@@ -75,7 +75,7 @@ class IntentReconciler:
     without a real slot_id.
     """
 
-    def __init__(self, llm_guard: LLMGuard):
+    def __init__(self, llm_guard: LLMGuard) -> None:
         self.llm_guard = llm_guard
 
     def reconcile(
@@ -104,7 +104,7 @@ class IntentReconciler:
 
         return self._apply_intent(form_schema, intent)
 
-    def _extract_intent(self, intent_prompt: str) -> Optional[dict]:
+    def _extract_intent(self, intent_prompt: str) -> Optional[Dict[str, Any]]:
         """
         Extract structured intent from free-text.
 
@@ -170,7 +170,7 @@ class IntentReconciler:
         return intent
 
     def _apply_intent(
-        self, schema: WebsiteFormSchema, intent: dict
+        self, schema: WebsiteFormSchema, intent: Dict[str, Any]
     ) -> WebsiteFormSchema:
         """
         Apply extracted intent to the schema.

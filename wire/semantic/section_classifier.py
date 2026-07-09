@@ -7,14 +7,15 @@ LLM fallback for ambiguous cases. The taxonomy is intentionally
 general-purpose (site-type agnostic).
 """
 
-import structlog
 from typing import List, Optional, Tuple
+
+import structlog
 
 from wire.schema.canonical import ComponentNode
 from wire.schema.semantic_schema import (
-    SectionRole,
-    ClassifiedSection,
     CLASSIFICATION_CONFIDENCE_THRESHOLD,
+    ClassifiedSection,
+    SectionRole,
 )
 from wire.semantic.llm_guard import LLMGuard
 
@@ -22,8 +23,15 @@ logger = structlog.get_logger(__name__)
 
 # Block-level elements that indicate section-level structure
 SECTION_LEVEL_TAGS = {
-    "div", "section", "header", "footer", "nav", "main", "aside",
-    "article", "form",
+    "div",
+    "section",
+    "header",
+    "footer",
+    "nav",
+    "main",
+    "aside",
+    "article",
+    "form",
 }
 
 # Repeatable-shaped roles that may have multiple instances
@@ -41,20 +49,79 @@ REPEATABLE_ROLES = {
 # genuine structural certainty claim >= 0.80.
 
 _CLASS_ID_PATTERNS: list[tuple[list[str], SectionRole, float]] = [
-    (["contact", "contact-us", "get-in-touch", "contact_us", "contactus"], SectionRole.CONTACT, 0.85),
-    (["testimonial", "review", "client-say", "client_say", "reviews", "testimonials"], SectionRole.TESTIMONIALS, 0.85),
-    (["pricing", "price", "plan", "plans", "pricing-table", "pricing_table"], SectionRole.PRICING, 0.85),
+    (
+        ["contact", "contact-us", "get-in-touch", "contact_us", "contactus"],
+        SectionRole.CONTACT,
+        0.85,
+    ),
+    (
+        [
+            "testimonial",
+            "review",
+            "client-say",
+            "client_say",
+            "reviews",
+            "testimonials",
+        ],
+        SectionRole.TESTIMONIALS,
+        0.85,
+    ),
+    (
+        ["pricing", "price", "plan", "plans", "pricing-table", "pricing_table"],
+        SectionRole.PRICING,
+        0.85,
+    ),
     (["team", "our-team", "staff", "our_team", "members"], SectionRole.TEAM, 0.85),
     (["faq", "frequently-asked", "faqs", "frequently_asked"], SectionRole.FAQ, 0.85),
-    (["blog", "news", "articles", "posts", "blog-feed", "blog_feed"], SectionRole.BLOG_FEED, 0.80),
-    (["portfolio", "work", "projects", "gallery", "our-work", "our_work", "showcase"], SectionRole.PORTFOLIO, 0.80),
-    (["service", "services", "what-we-do", "what_we_do", "offerings"], SectionRole.SERVICES, 0.80),
-    (["about", "about-us", "who-we-are", "about_us", "who_we_are"], SectionRole.ABOUT, 0.80),
-    (["feature", "features", "feature-grid", "feature_grid"], SectionRole.FEATURE_GRID, 0.80),
+    (
+        ["blog", "news", "articles", "posts", "blog-feed", "blog_feed"],
+        SectionRole.BLOG_FEED,
+        0.80,
+    ),
+    (
+        [
+            "portfolio",
+            "work",
+            "projects",
+            "gallery",
+            "our-work",
+            "our_work",
+            "showcase",
+        ],
+        SectionRole.PORTFOLIO,
+        0.80,
+    ),
+    (
+        ["service", "services", "what-we-do", "what_we_do", "offerings"],
+        SectionRole.SERVICES,
+        0.80,
+    ),
+    (
+        ["about", "about-us", "who-we-are", "about_us", "who_we_are"],
+        SectionRole.ABOUT,
+        0.80,
+    ),
+    (
+        ["feature", "features", "feature-grid", "feature_grid"],
+        SectionRole.FEATURE_GRID,
+        0.80,
+    ),
     (["cta", "call-to-action", "call_to_action"], SectionRole.CTA, 0.80),
-    (["social", "social-media", "social-links", "social_links", "social_media"], SectionRole.SOCIAL_LINKS, 0.80),
-    (["hero", "banner", "jumbotron", "hero-section", "hero_section", "masthead"], SectionRole.HERO, 0.90),
-    (["media-gallery", "media_gallery", "image-gallery", "photo-gallery"], SectionRole.MEDIA_GALLERY, 0.80),
+    (
+        ["social", "social-media", "social-links", "social_links", "social_media"],
+        SectionRole.SOCIAL_LINKS,
+        0.80,
+    ),
+    (
+        ["hero", "banner", "jumbotron", "hero-section", "hero_section", "masthead"],
+        SectionRole.HERO,
+        0.90,
+    ),
+    (
+        ["media-gallery", "media_gallery", "image-gallery", "photo-gallery"],
+        SectionRole.MEDIA_GALLERY,
+        0.80,
+    ),
     (["sidebar", "side-bar", "side_bar"], SectionRole.SIDEBAR, 0.85),
 ]
 
@@ -72,7 +139,7 @@ class SectionClassifier:
     Sections below 0.80 confidence → UNKNOWN, never forced into a category.
     """
 
-    def __init__(self, llm_guard: LLMGuard):
+    def __init__(self, llm_guard: LLMGuard) -> None:
         self.llm_guard = llm_guard
 
     def classify_tree(self, root: ComponentNode) -> List[ClassifiedSection]:
@@ -128,7 +195,9 @@ class SectionClassifier:
         # LLM fallback for ambiguous nodes
         return self._llm_classify(node, node_path)
 
-    def _heuristic_classify(self, node: ComponentNode) -> Tuple[SectionRole, float, str]:
+    def _heuristic_classify(
+        self, node: ComponentNode
+    ) -> Tuple[SectionRole, float, str]:
         """
         Heuristic classification based on tag, class, id, and ARIA roles.
 
@@ -151,19 +220,27 @@ class SectionClassifier:
             classes = self._get_classes(node)
             hero_keywords = {"hero", "banner", "jumbotron", "masthead"}
             if any(kw in cls.lower() for cls in classes for kw in hero_keywords):
-                return SectionRole.HERO, 0.90, f"<header> tag with hero-class: {classes}"
-            return SectionRole.HERO, 0.80, "Structural <header> tag (likely hero/banner)"
+                return (
+                    SectionRole.HERO,
+                    0.90,
+                    f"<header> tag with hero-class: {classes}",
+                )
+            return (
+                SectionRole.HERO,
+                0.80,
+                "Structural <header> tag (likely hero/banner)",
+            )
 
         # ARIA role-based classification
         aria_role = node.attributes.get("role", "").lower()
         if aria_role == "navigation":
-            return SectionRole.NAVIGATION, 0.90, f"ARIA role='navigation'"
+            return SectionRole.NAVIGATION, 0.90, "ARIA role='navigation'"
         if aria_role == "contentinfo":
-            return SectionRole.FOOTER, 0.85, f"ARIA role='contentinfo'"
+            return SectionRole.FOOTER, 0.85, "ARIA role='contentinfo'"
         if aria_role == "banner":
-            return SectionRole.HERO, 0.85, f"ARIA role='banner'"
+            return SectionRole.HERO, 0.85, "ARIA role='banner'"
         if aria_role == "complementary":
-            return SectionRole.SIDEBAR, 0.80, f"ARIA role='complementary'"
+            return SectionRole.SIDEBAR, 0.80, "ARIA role='complementary'"
 
         # Class/ID pattern matching
         classes = self._get_classes(node)
@@ -174,7 +251,11 @@ class SectionClassifier:
             for identifier in all_identifiers:
                 for pattern in patterns:
                     if pattern in identifier:
-                        return role, conf, f"Class/ID match: '{identifier}' contains '{pattern}'"
+                        return (
+                            role,
+                            conf,
+                            f"Class/ID match: '{identifier}' contains '{pattern}'",
+                        )
 
         # No match — return UNKNOWN
         return SectionRole.UNKNOWN, 0.0, "No heuristic match found"
@@ -269,6 +350,7 @@ class SectionClassifier:
 
         # Count the most common skeleton pattern
         from collections import Counter
+
         counts = Counter(skeletons)
         most_common_skeleton, most_common_count = counts.most_common(1)[0]
 

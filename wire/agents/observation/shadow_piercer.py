@@ -1,3 +1,5 @@
+from typing import Any, Dict, List
+
 import structlog
 from playwright.async_api import Page
 
@@ -10,7 +12,7 @@ class ShadowPiercer:
     Recursively pierces shadow roots to access encapsulated content.
     """
 
-    async def extract_shadow_content(self, page: Page) -> list[dict]:
+    async def extract_shadow_content(self, page: Page) -> List[Dict[str, Any]]:
         logger.info("piercing_shadow_dom")
 
         shadow_content = await page.evaluate("""
@@ -224,5 +226,7 @@ class ShadowPiercer:
             }
         """)
 
-        logger.info("shadow_dom_extraction_complete", components_found=len(shadow_content))
-        return shadow_content
+        logger.info(
+            "shadow_dom_extraction_complete", components_found=len(shadow_content)
+        )
+        return shadow_content  # type: ignore[no-any-return]

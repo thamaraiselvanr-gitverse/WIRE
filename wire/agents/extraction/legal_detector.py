@@ -1,6 +1,8 @@
-import structlog
-import httpx
 import urllib.parse
+from typing import Any, Dict
+
+import httpx
+import structlog
 
 logger = structlog.get_logger(__name__)
 
@@ -11,13 +13,13 @@ class LegalDetector:
     a compliance classification for the target URL.
     """
 
-    async def analyze(self, url: str) -> dict:
+    async def analyze(self, url: str) -> Dict[str, Any]:
         logger.info("analyzing_legal_compliance", url=url)
         parsed = urllib.parse.urlparse(url)
         base_url = f"{parsed.scheme}://{parsed.netloc}"
         robots_url = f"{base_url}/robots.txt"
 
-        result = {
+        result: Dict[str, Any] = {
             "url": url,
             "robots_txt": {"found": False, "content": None, "allowed": True},
             "tos_detected": False,

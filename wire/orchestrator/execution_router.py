@@ -1,71 +1,102 @@
 import json
 import os
+from typing import Any, Dict, List, Optional, Tuple
+
 import structlog
-from typing import Dict, Any, List, Optional
 
 from wire.agents.exploration.crawler import Crawler
 from wire.agents.exploration.fuzzer import InteractionFuzzer
 from wire.agents.exploration.region_probe import RegionProbe
-from wire.agents.observation.browser_session import BrowserSession
-from wire.agents.observation.viewport_renderer import ViewportRenderer
-from wire.agents.observation.auth_handler import AuthHandler
-from wire.agents.observation.shadow_piercer import ShadowPiercer
-from wire.agents.observation.spa_detector import SPADetector
 from wire.agents.extraction.asset_downloader import AssetDownloader
+from wire.agents.extraction.behavioral_extractor import BehavioralExtractor
+from wire.agents.extraction.comprehensive_extractor import ComprehensiveExtractor
 from wire.agents.extraction.design_analyzer import DesignAnalyzer
 from wire.agents.extraction.interaction_recorder import InteractionRecorder
 from wire.agents.extraction.legal_detector import LegalDetector
 from wire.agents.extraction.network_monitor import NetworkMonitor
-from wire.storage.local import LocalStorage
-from wire.storage.template_repo import TemplateRepository
-from wire.utils.fidelity_scorer import FidelityScorer
-from wire.orchestrator.scheduler import TaskScheduler
-from wire.orchestrator.coordinator import Coordinator
-from wire.orchestrator.checkpointing import CheckpointManager
-from wire.orchestrator.semantic_merger import SemanticMerger
-from wire.orchestrator.consensus import ConsensusValidator
-from wire.schema.canonical import CanonicalDesignSchema, ComponentNode, DesignTokens, HTMLToCidsParser
-from wire.schema.style_mapper import CascadeResolver
-from wire.schema.input_blueprint import InputBlueprint, DataSlot, SlotConstraint
+from wire.agents.extraction.tracker_stripper import TrackerStripper
+from wire.agents.observation.auth_handler import AuthHandler
+from wire.agents.observation.browser_session import BrowserSession
+from wire.agents.observation.computed_style_capturer import ComputedStyleCapturer
+from wire.agents.observation.shadow_piercer import ShadowPiercer
+from wire.agents.observation.spa_detector import SPADetector
+from wire.agents.observation.viewport_renderer import ViewportRenderer
 from wire.compilers.html_compiler import HTMLCompiler
 from wire.compilers.react_adapter import ReactAdapter
 from wire.compilers.vue_adapter import VueAdapter
-from wire.validation.visual_diff import VisualDiff
-from wire.validation.structural import StructuralValidator
-from wire.synthesis.prompt_generator import PromptGenerator
-from wire.synthesis.knowledge_index import KnowledgeIndex
-from wire.templates.registry import TemplateRegistry
-from wire.templates.tokens import DesignTokenSystem
-from wire.templates.artifact import WireArtifact
-from wire.templates.composer import TemplateComposer
-from wire.templates.versioning import TemplateVersioning
-from wire.templates.preview import TemplatePreview
-from wire.semantic.llm_guard import LLMGuard
-from wire.semantic.section_classifier import SectionClassifier
-from wire.semantic.placeholder_detector import PlaceholderDetector
+from wire.evaluation.repurpose_harness import RepurposeEvaluator, RepurposeReport
+from wire.generation.document_ingestion import DocumentIngestionPipeline
+from wire.generation.image_ingestion import ImageIngestionPipeline
+from wire.generation.media_ingestion import MediaIngestionPipeline
+from wire.generation.submission_validator import SubmissionValidator
+from wire.generation.substitution_mapper import SubstitutionMapper
+from wire.generation.transformation_prompt_generator import (
+    TransformationPromptGenerator,
+)
+from wire.layout.interactivity_transformer import InteractivityTransformer
+from wire.layout.layout_reflow_engine import LayoutReflowEngine
+from wire.layout.section_removal_planner import SectionRemovalPlanner
+from wire.layout.structural_integrity_validator import StructuralIntegrityValidator
+from wire.orchestrator.checkpointing import CheckpointManager
+from wire.orchestrator.coordinator import Coordinator
+from wire.orchestrator.scheduler import TaskScheduler
+from wire.orchestrator.semantic_merger import SemanticMerger
+from wire.schema.canonical import (
+    CanonicalDesignSchema,
+    ComponentNode,
+    DesignTokens,
+    HTMLToCidsParser,
+)
+from wire.schema.input_blueprint import InputBlueprint
+from wire.schema.layout_schema import (
+    IntegrityReport,
+    IntegrityViolation,
+    RemovalResult,
+)
+from wire.schema.style_mapper import CascadeResolver
+from wire.schema.submission_schema import (
+    AudioValue,
+    DocumentValue,
+    ImageValue,
+    RepeatableGroupValue,
+    SubmissionPayload,
+    SubmissionResult,
+    ValidationItem,
+    VideoValue,
+)
 from wire.semantic.form_schema_compiler import FormSchemaCompiler
 from wire.semantic.intent_reconciler import IntentReconciler
+from wire.semantic.llm_guard import LLMGuard
+from wire.semantic.placeholder_detector import PlaceholderDetector
 from wire.semantic.profiles.portfolio_profile import PortfolioProfile
-from wire.schema.layout_schema import RemovalPlan, ReflowAction, IntegrityReport, RemovalResult
-from wire.layout.section_removal_planner import SectionRemovalPlanner
-from wire.layout.layout_reflow_engine import LayoutReflowEngine
-from wire.layout.structural_integrity_validator import StructuralIntegrityValidator
-from wire.schema.submission_schema import SubmissionPayload, SubmissionResult, ValidationSummary, ValidationItem, ImageValue, RepeatableGroupValue
-from wire.generation.submission_validator import SubmissionValidator
-from wire.generation.image_ingestion import ImageIngestionPipeline
-from wire.generation.substitution_mapper import SubstitutionMapper
-from wire.generation.transformation_prompt_generator import TransformationPromptGenerator
-
+from wire.semantic.section_classifier import SectionClassifier
+from wire.semantic.slot_discovery import HeuristicSlotDiscoverer
+from wire.storage.local import LocalStorage
+from wire.storage.object_sync import ObjectStorageSync
+from wire.storage.template_repo import TemplateRepository
+from wire.synthesis.knowledge_index import KnowledgeIndex
+from wire.synthesis.prompt_generator import PromptGenerator
+from wire.templates.artifact import WireArtifact
+from wire.templates.composer import TemplateComposer
+from wire.templates.preview import TemplatePreview
+from wire.templates.registry import TemplateRegistry
+from wire.templates.tokens import DesignTokenSystem
+from wire.templates.versioning import TemplateVersioning
+from wire.utils.errors import ComplianceError
+from wire.utils.fidelity_scorer import FidelityScorer
+from wire.validation.structural import StructuralValidator
+from wire.validation.visual_diff import VisualDiff
 
 logger = structlog.get_logger(__name__)
 
 
 class ExecutionRouter:
-    def __init__(self):
+    def __init__(self) -> None:
         # Phase 1 — Foundation
         self.crawler = Crawler()
         self.browser = BrowserSession()
         self.downloader = AssetDownloader()
+        self.tracker_stripper = TrackerStripper()
         self.storage = LocalStorage()
         self.scorer = FidelityScorer()
 
@@ -91,14 +122,16 @@ class ExecutionRouter:
 
         # Phase 4 — Full-Spectrum & Knowledge Engine
         self.shadow_piercer = ShadowPiercer()
+        self.computed_style_capturer = ComputedStyleCapturer()
         self.spa_detector = SPADetector()
         self.network_monitor = NetworkMonitor()
+        self.comprehensive_extractor = ComprehensiveExtractor()
+        self.behavioral_extractor = BehavioralExtractor()
         self.prompt_generator = PromptGenerator()
         self.knowledge_index = KnowledgeIndex()
 
         # Phase 5 — Distributed Scale
         self.region_probe = RegionProbe()
-        self.consensus = ConsensusValidator()
 
         # Phase 6 — Template Ecosystem
         self.template_registry = TemplateRegistry()
@@ -110,6 +143,7 @@ class ExecutionRouter:
 
         # Phase 7 — Semantic Interpretation Layer
         from wire.semantic.llm_client import LLMClient
+
         self._llm_client = LLMClient()
         self._llm_guard = LLMGuard(llm_client=self._llm_client)
         self._section_classifier = SectionClassifier(self._llm_guard)
@@ -117,6 +151,8 @@ class ExecutionRouter:
         self._form_compiler = FormSchemaCompiler(self._placeholder_detector)
         self._intent_reconciler = IntentReconciler(self._llm_guard)
         self._portfolio_profile = PortfolioProfile()
+        self._slot_discoverer = HeuristicSlotDiscoverer()
+        self.interactivity_transformer = InteractivityTransformer()
 
         # Phase 8 — Layout Adaptation Engine
         self._removal_planner = SectionRemovalPlanner()
@@ -128,11 +164,55 @@ class ExecutionRouter:
         self.domain_profile: Optional[str] = None
         self.intent_prompt: Optional[str] = None
 
-    async def execute_pipeline(self, url: str) -> float:
-        logger.info("executing_full_pipeline", url=url)
+        # Accuracy config flags
+        # Off by default to preserve existing single-page pipeline behavior;
+        # set True to crawl and reconstruct the full same-domain site map.
+        self.enable_multi_page_crawl: bool = False
+
+        # Runtime behavioral capture (JS animation libraries, hover/focus state
+        # deltas, scroll-triggered reveals). Off by default: the deep variant
+        # adds several seconds of live interaction per page.
+        # Operator-supplied credentials for authenticated capture. Shape:
+        # {"cookies": [...], "headers": {...}, "storage": {"origin","local","session"}}.
+        # None (default) captures anonymously.
+        self.auth_credentials: Optional[Dict[str, Any]] = None
+
+        self.enable_behavioral_capture: bool = False
+        # When behavioral capture is on, also measure carousel autoplay timing
+        # and timed/exit-intent triggers (adds ~8-10s of bounded observation).
+        self.behavioral_deep: bool = False
+
+        # Refuse to reconstruct targets whose robots.txt disallows crawling.
+        # On by default; set False only for explicitly authorized captures.
+        self.respect_robots: bool = True
+
+        # Strip analytics/ad/pixel trackers from the clone before asset
+        # download. Off by default: it changes page behavior, and the default
+        # pipeline promise is fidelity. When on, a tracker_report.json records
+        # everything removed.
+        self.enable_tracker_stripping: bool = False
+
+    def _check_compliance(self, legal_result: Dict[str, Any]) -> None:
+        """Abort (ComplianceError) when robots.txt disallows and respect_robots."""
+        if self.respect_robots and legal_result.get("classification") == "restricted":
+            logger.warning(
+                "reconstruction_blocked_by_robots", url=legal_result.get("url")
+            )
+            raise ComplianceError(
+                "Target disallows crawling via robots.txt; reconstruction refused."
+            )
+
+    async def execute_pipeline(self, url: str, run_id: Optional[str] = None) -> float:
+        """Run the full reconstruction pipeline for ``url``.
+
+        ``run_id`` names the output directory (the platform passes
+        ``project_<id>`` so runs are isolated per project); when omitted the
+        directory is derived from the URL's domain (CLI behavior).
+        """
+        logger.info("executing_full_pipeline", url=url, run_id=run_id)
 
         # Initialize storage
-        self.storage.initialize_for_url(url)
+        self.storage.initialize_for_url(url, run_id=run_id)
         self.checkpoint = CheckpointManager(
             os.path.join(self.storage.current_run_dir, ".checkpoint")
         )
@@ -143,10 +223,16 @@ class ExecutionRouter:
         # ── Phase 3: Legal compliance ──
         legal_result = await self.legal_detector.analyze(url)
         self._save_json("compliance_report.json", legal_result)
+        self._check_compliance(legal_result)
 
         # ── Phase 1: Crawl ──
-        pages = await self.crawler.crawl(url, single_page=True)
+        pages = await self.crawler.crawl(
+            url, single_page=not self.enable_multi_page_crawl
+        )
 
+        # Apply operator-supplied auth (cookies/headers/storage) if configured
+        # for capturing pages behind a login; None leaves capture unauthenticated.
+        self.browser.credentials = getattr(self, "auth_credentials", None)
         await self.browser.start()
         partial_results = []
         try:
@@ -160,7 +246,9 @@ class ExecutionRouter:
                 state = self.checkpoint.mark_page_done(state, page_url)
 
         except Exception as e:
-            self.scorer.log_critical_error("Pipeline execution failed", {"error": str(e)})
+            self.scorer.log_critical_error(
+                "Pipeline execution failed", {"error": str(e)}
+            )
             raise
         finally:
             await self.browser.stop()
@@ -179,7 +267,9 @@ class ExecutionRouter:
         self._run_template_ecosystem(url, template_id)
 
         # ── Phase 6: Package .wire artifact ──
-        artifact_path = os.path.join(self.storage.current_run_dir, f"{template_id}.wire")
+        artifact_path = os.path.join(
+            self.storage.current_run_dir, f"{template_id}.wire"
+        )
         WireArtifact.package(self.storage.current_run_dir, artifact_path, {"url": url})
         verify_result = WireArtifact.verify(artifact_path)
         self._save_json("artifact_verification.json", verify_result)
@@ -187,12 +277,31 @@ class ExecutionRouter:
         # Clear checkpoint on success
         self.checkpoint.clear()
 
+        # ── Durability: mirror the completed run to object storage when
+        # configured (WIRE_S3_BUCKET). Best-effort — never fails the run. ──
+        if ObjectStorageSync.enabled():
+            sync_report = ObjectStorageSync().upload_run(
+                self.storage.current_run_dir, run_id or self._run_dir_name()
+            )
+            self._save_json("object_sync_report.json", sync_report)
+
         score = self.scorer.compute_score()
         logger.info("pipeline_completed_successfully", fidelity_score=score)
         return score
 
-    async def _process_page(self, page_url: str, state: dict) -> dict:
-        result: Dict[str, Any] = {"page": page_url, "assets": [], "interactions": [], "errors": []}
+    def _run_dir_name(self) -> str:
+        """The basename of the current run directory (its object-store key)."""
+        return os.path.basename(self.storage.current_run_dir.rstrip(os.sep))
+
+    async def _process_page(
+        self, page_url: str, state: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        result: Dict[str, Any] = {
+            "page": page_url,
+            "assets": [],
+            "interactions": [],
+            "errors": [],
+        }
 
         page_lock = f"lock:page:{page_url}"
         if not self.coordinator.acquire_lock(page_lock):
@@ -203,9 +312,17 @@ class ExecutionRouter:
             # ── Phase 1: Capture ──
             content = await self.browser.capture_page(page_url)
             if not content:
-                self.scorer.log_critical_error("Failed to capture page content", {"url": page_url})
+                self.scorer.log_critical_error(
+                    "Failed to capture page content", {"url": page_url}
+                )
                 return result
             original_content = content
+
+            # ── Opt-in: strip trackers before asset download so tracker JS
+            # and pixels are never fetched or localized. ──
+            if self.enable_tracker_stripping:
+                content, tracker_report = self.tracker_stripper.strip(content)
+                self._save_json("tracker_report.json", tracker_report)
 
             # ── Phase 1: Extract & download assets ──
             rewritten_content, assets = await self.downloader.download_assets(
@@ -222,16 +339,23 @@ class ExecutionRouter:
                     for fname in files:
                         if fname.endswith(".css"):
                             try:
-                                with open(os.path.join(root, fname), "r", encoding="utf-8", errors="ignore") as f:
+                                with open(
+                                    os.path.join(root, fname),
+                                    "r",
+                                    encoding="utf-8",
+                                    errors="ignore",
+                                ) as f:
                                     css_content_agg += "\n" + f.read()
                             except Exception:
                                 pass
 
-            design_tokens = self.design_analyzer.extract_design_architecture(rewritten_content, css_content_agg)
+            design_tokens = self.design_analyzer.extract_design_architecture(
+                rewritten_content, css_content_agg
+            )
             self._save_json("design_architecture.json", design_tokens)
 
             # Open a live page for interactive work
-            page_obj = await self.browser.context.new_page()
+            page_obj = await self.browser.context.new_page()  # type: ignore[union-attr]
 
             # ── Phase 4: Network monitoring (start before navigation) ──
             self.network_monitor.reset()
@@ -250,16 +374,62 @@ class ExecutionRouter:
             shadow_content = await self.shadow_piercer.extract_shadow_content(page_obj)
             self._save_json("shadow_dom.json", shadow_content)
 
+            # ── Accuracy: engine-computed styles ──
+            # Capture getComputedStyle per element at the desktop viewport used
+            # for visual diff, so the CIDS prefers browser-resolved values over
+            # the heuristic cascade. Fails open to {} offline / on error.
+            await page_obj.set_viewport_size({"width": 1920, "height": 1080})
+            computed_style_map = await self.computed_style_capturer.capture(page_obj)
+            # Re-capture at responsive breakpoints; deltas vs desktop become
+            # engine-resolved @media overrides. Restores the desktop viewport.
+            computed_responsive_map = (
+                await self.computed_style_capturer.capture_responsive(
+                    page_obj, computed_style_map
+                )
+            )
+            # Dark-scheme deltas ride the same media-query mechanism: pages
+            # styled for prefers-color-scheme keep their dark variant.
+            dark_scheme_map = await self.computed_style_capturer.capture_color_scheme(
+                page_obj, computed_style_map
+            )
+            for dark_path, media_map in dark_scheme_map.items():
+                computed_responsive_map.setdefault(dark_path, {}).update(media_map)
+            self._save_json(
+                "computed_styles.json",
+                {
+                    "url": page_url,
+                    "elements_captured": len(computed_style_map),
+                    "responsive_elements_captured": len(computed_responsive_map),
+                    "dark_scheme_elements_captured": len(dark_scheme_map),
+                },
+            )
+
             # ── Phase 4: Network report ──
             network_report = self.network_monitor.get_report()
             self._save_json("network_report.json", network_report)
-            
+
             # Save API discovery blueprint
             api_endpoints = network_report.get("api_endpoints", [])
-            self._save_json("api_discovery_blueprint.json", {
-                "url": page_url,
-                "api_endpoints_discovered": api_endpoints
-            })
+            self._save_json(
+                "api_discovery_blueprint.json",
+                {"url": page_url, "api_endpoints_discovered": api_endpoints},
+            )
+
+            # ── Comprehensive design-knowledge extraction (in-browser) ──
+            # Meta/SEO, :root tokens, typography, color palette, webfonts,
+            # animations, breakpoints, icon library, a11y + component inventory.
+            extraction_report = await self.comprehensive_extractor.extract(page_obj)
+            self._save_json("extraction_report.json", extraction_report)
+
+            # ── Runtime behavioral capture (opt-in) ──
+            # Drives the live page: JS animation-library detection, per-component
+            # hover/focus computed-style deltas, scroll-triggered reveals, and
+            # (deep) carousel autoplay + timed/exit-intent triggers.
+            if self.enable_behavioral_capture:
+                behavior_report = await self.behavioral_extractor.extract(
+                    page_obj, deep=self.behavioral_deep
+                )
+                self._save_json("behavior_report.json", behavior_report)
 
             # ── Phase 2: Viewport captures ──
             viewport_results = await self.viewport_renderer.capture_viewports(
@@ -273,34 +443,72 @@ class ExecutionRouter:
 
             # ── Phase 3: Interaction recording ──
             hover_records = await self.interaction_recorder.record_hover_states(
-                page_obj, fuzz_results.get("hoverable", []), self.storage.get_asset_path()
+                page_obj,
+                fuzz_results.get("hoverable", []),
+                self.storage.get_asset_path(),
             )
             result["interactions"] = hover_records
             self._save_json("interaction_catalogue.json", hover_records)
 
             # ── Phase 5: Multi-region captures ──
             region_results = await self.region_probe.capture_regions(
-                self.browser.browser, page_url, self.storage.get_asset_path()
+                self.browser.browser, page_url, self.storage.get_asset_path()  # type: ignore[arg-type]
             )
             self._save_json("region_variants.json", region_results)
 
-            # ── Phase 5: Consensus validation (multi-render) ──
-            renders = []
-            for _ in range(3):
-                render_page = await self.browser.context.new_page()
-                await render_page.goto(page_url, wait_until="networkidle", timeout=30000)
-                render_bytes = await render_page.screenshot(full_page=True)
-                renders.append(render_bytes)
-                await render_page.close()
-            consensus_result = await self.consensus.validate(renders)
-            self._save_json("consensus_validation.json", consensus_result)
+            # ── Dynamic-region detection (non-deterministic content) ──
+            # Re-render the original a few times at the desktop viewport to find
+            # pixels that vary between identical loads — ads, carousels, videos,
+            # animations. The resulting mask is passed to the visual fidelity
+            # comparison so these regions don't unfairly penalize the score.
+            dynamic_mask = None
+            try:
+                desktop_rel = viewport_results.get("desktop")
+                variant_paths = []
+                if desktop_rel:
+                    variant_paths.append(
+                        os.path.join(self.storage.current_run_dir, desktop_rel)
+                    )
+                await page_obj.set_viewport_size({"width": 1920, "height": 1080})
+                for i in range(2):
+                    await page_obj.wait_for_timeout(300)
+                    shot = await page_obj.screenshot(full_page=True)
+                    vpath = os.path.join(
+                        self.storage.get_asset_path(),
+                        f"capture_desktop_variant{i + 1}.png",
+                    )
+                    with open(vpath, "wb") as vf:
+                        vf.write(shot)
+                    variant_paths.append(vpath)
+                dynamic_mask = self.visual_diff.volatility_mask(variant_paths)
+                self._save_json(
+                    "dynamic_regions.json",
+                    {
+                        "url": page_url,
+                        "renders_compared": len(variant_paths),
+                        "volatile_pixels": (
+                            int(dynamic_mask.sum()) if dynamic_mask is not None else 0
+                        ),
+                        "mask_available": dynamic_mask is not None,
+                    },
+                )
+            except Exception as dyn_err:
+                logger.warning(
+                    "dynamic_region_detection_failed",
+                    url=page_url,
+                    error=str(dyn_err),
+                )
 
             await page_obj.close()
 
             # ── Phase 2.5: Cascade Resolution ──
             resolver = CascadeResolver()
-            soup_with_cascade, styles_map = resolver.resolve(rewritten_content, css_content_agg)
-            self._save_json("cascade_styles_map.json", {str(k): v for k, v in styles_map.items()})
+            soup_with_cascade, styles_map = resolver.resolve(
+                rewritten_content, css_content_agg
+            )
+            self._save_json(
+                "cascade_styles_map.json", {str(k): v for k, v in styles_map.items()}
+            )
 
             # Map captured interactions back to BeautifulSoup node objects
             interactions_map = {}
@@ -311,19 +519,30 @@ class ExecutionRouter:
                         try:
                             el = soup_with_cascade.select_one(path)
                             if el:
-                                interactions_map[id(el)] = {"hover": rec.get("style_diff", {})}
+                                interactions_map[id(el)] = {
+                                    "hover": rec.get("style_diff", {})
+                                }
                         except Exception as parse_error:
-                            logger.warning("interaction_mapping_failed", path=path, error=str(parse_error))
+                            logger.warning(
+                                "interaction_mapping_failed",
+                                path=path,
+                                error=str(parse_error),
+                            )
 
             # Map shadow DOM structures
             shadow_roots_map = {}
             if shadow_content:
                 try:
-                    def dict_to_node(d: dict) -> ComponentNode:
+
+                    def dict_to_node(d: Dict[str, Any]) -> ComponentNode:
                         if not d:
-                            return None
+                            return None  # type: ignore[return-value]
                         children = [dict_to_node(c) for c in d.get("children", []) if c]
-                        shadow_root = dict_to_node(d["shadow_root"]) if d.get("shadow_root") else None
+                        shadow_root = (
+                            dict_to_node(d["shadow_root"])
+                            if d.get("shadow_root")
+                            else None
+                        )
                         return ComponentNode(
                             tag=d.get("tag", "div"),
                             attributes=d.get("attributes", {}),
@@ -331,7 +550,7 @@ class ExecutionRouter:
                             children=children,
                             shadow_root=shadow_root,
                             style_provenance=d.get("style_provenance"),
-                            text_content=d.get("text_content")
+                            text_content=d.get("text_content"),
                         )
 
                     for entry in shadow_content:
@@ -344,20 +563,28 @@ class ExecutionRouter:
 
             # ── Phase 2: Schema synthesis (CIDS) ──
             real_root = HTMLToCidsParser.parse(
-                soup_with_cascade, 
-                styles_map, 
-                interactions_map=interactions_map, 
-                shadow_roots_map=shadow_roots_map
+                soup_with_cascade,
+                styles_map,
+                interactions_map=interactions_map,
+                shadow_roots_map=shadow_roots_map,
+                responsive_map=getattr(resolver, "responsive_map", {}),
+                pseudo_map=getattr(resolver, "pseudo_map", {}),
+                computed_style_map=computed_style_map,
+                computed_responsive_map=computed_responsive_map,
             )
             cids = CanonicalDesignSchema(
                 url=page_url,
                 tokens=DesignTokens(**design_tokens),
-                root=real_root
+                root=real_root,
+                global_styles=getattr(resolver, "global_styles", []),
             )
-            
+
             # Adaptive node validation
-            def get_depth_and_count(node: ComponentNode, current_depth=1):
-                if not node.children: return current_depth, 1
+            def get_depth_and_count(
+                node: ComponentNode, current_depth: int = 1
+            ) -> Tuple[int, int]:
+                if not node.children:
+                    return current_depth, 1
                 max_d = current_depth
                 total_c = 1
                 for child in node.children:
@@ -367,49 +594,100 @@ class ExecutionRouter:
                 return max_d, total_c
 
             cids_depth, cids_count = get_depth_and_count(real_root)
-            
-            from bs4 import BeautifulSoup
-            bs_count = len(BeautifulSoup(rewritten_content, 'lxml').find_all(True))
 
-            logger.info("cids_validation_metrics", 
-                        dom_nodes=bs_count,
-                        cids_nodes=cids_count, 
-                        cids_depth=cids_depth, 
-                        css_rules=len(design_tokens.get("colors", {})),
-                        elements_styled=len(styles_map),
-                        url=page_url)
+            from bs4 import BeautifulSoup
+
+            bs_count = len(BeautifulSoup(rewritten_content, "lxml").find_all(True))
+
+            logger.info(
+                "cids_validation_metrics",
+                dom_nodes=bs_count,
+                cids_nodes=cids_count,
+                cids_depth=cids_depth,
+                css_rules=len(design_tokens.get("colors", {})),
+                elements_styled=len(styles_map),
+                url=page_url,
+            )
 
             if bs_count > 10 and cids_count < bs_count * 0.1:
-                raise ValueError(f"CIDS extraction failed proportional consistency check. DOM: {bs_count}, CIDS: {cids_count}")
+                raise ValueError(
+                    f"CIDS extraction failed proportional consistency check. DOM: {bs_count}, CIDS: {cids_count}"
+                )
             if text_val := getattr(real_root, "text_content", None):
                 if "Compiled DOM" in text_val:
                     raise ValueError("Mocked 'Compiled DOM' text found in CIDS root.")
-            blueprint = InputBlueprint(
-                slots={
-                    "slot_title": DataSlot(
-                        id="slot_title", type="text",
-                        constraint=SlotConstraint(allowed_types=["text"])
-                    )
-                }
-            )
-            with open(os.path.join(self.storage.current_run_dir, "schema_cids.json"), "w", encoding="utf-8") as f:
+            # Heuristic slot discovery: bind slot_ids onto replaceable content
+            # nodes (leaf text, images) and build a real InputBlueprint, so the
+            # form schema exposes editable fields without an LLM. Mutates the
+            # CIDS in place, so the slot bindings persist in schema_cids.json and
+            # flow to content substitution.
+            blueprint = self._slot_discoverer.discover(real_root)
+            with open(
+                os.path.join(self.storage.current_run_dir, "schema_cids.json"),
+                "w",
+                encoding="utf-8",
+            ) as f:
                 f.write(cids.model_dump_json(indent=2))
-            with open(os.path.join(self.storage.current_run_dir, "schema_blueprint.json"), "w", encoding="utf-8") as f:
+            with open(
+                os.path.join(self.storage.current_run_dir, "schema_blueprint.json"),
+                "w",
+                encoding="utf-8",
+            ) as f:
                 f.write(blueprint.model_dump_json(indent=2))
+
+            # ── Editable HTML reconstruction (full standalone document) ──
+            editable_html = self.html_compiler.compile_document(
+                cids, title=extraction_report.get("title") or None
+            )
+            with open(
+                os.path.join(self.storage.current_run_dir, "output_editable.html"),
+                "w",
+                encoding="utf-8",
+            ) as f:
+                f.write(editable_html)
+
+            # ── Phase 3 accuracy: declarative interactivity ──
+            # Restore JS-driven dropdowns/disclosures as CSS/HTML in a SEPARATE
+            # artifact, so the pixel-scored editable output is never altered.
+            interactive_root, interactivity = self.interactivity_transformer.transform(
+                cids.root
+            )
+            interactive_cids = CanonicalDesignSchema(
+                url=cids.url,
+                tokens=cids.tokens,
+                root=interactive_root,
+                global_styles=list(cids.global_styles) + interactivity.injected_styles,
+            )
+            interactive_html = self.html_compiler.compile_document(
+                interactive_cids, title=extraction_report.get("title") or None
+            )
+            with open(
+                os.path.join(self.storage.current_run_dir, "output_interactive.html"),
+                "w",
+                encoding="utf-8",
+            ) as f:
+                f.write(interactive_html)
+            self._save_json("interactivity_report.json", interactivity.model_dump())
 
             # ── Phase 5: Framework adapter compilation ──
             react_output = self.react_adapter.compile(cids)
-            with open(os.path.join(self.storage.current_run_dir, "output_react.jsx"), "w", encoding="utf-8") as f:
+            with open(
+                os.path.join(self.storage.current_run_dir, "output_react.jsx"),
+                "w",
+                encoding="utf-8",
+            ) as f:
                 f.write(react_output)
             vue_output = self.vue_adapter.compile(cids)
-            with open(os.path.join(self.storage.current_run_dir, "output_vue.vue"), "w", encoding="utf-8") as f:
+            with open(
+                os.path.join(self.storage.current_run_dir, "output_vue.vue"),
+                "w",
+                encoding="utf-8",
+            ) as f:
                 f.write(vue_output)
 
             # ── Phase 7: Semantic interpretation ──
             if self.enable_semantic_layer:
                 self._run_semantic_interpretation(cids, blueprint, page_url)
-
-
 
             # ── Phase 4: AI prompts ──
             prompts = self.prompt_generator.generate_prompts(design_tokens, page_url)
@@ -420,16 +698,161 @@ class ExecutionRouter:
             self.knowledge_index.index_design(page_url, design_tokens)
 
             # ── Phase 3: Structural validation ──
-            structural_result = self.structural_validator.compare(original_content, rewritten_content)
+            # The editable CIDS recompilation is the actual product, so it is
+            # what the fidelity score is capped by. The asset-localized clone is
+            # near-identical to the original DOM by construction, so scoring it
+            # would flatter the number; it is kept only as a diagnostic.
+            structural_result = self.structural_validator.compare(
+                original_content, editable_html
+            )
             self._save_json("structural_validation.json", structural_result)
+            if "structural_score" in structural_result:
+                self.scorer.record_structural_similarity(
+                    structural_result["structural_score"], {"url": page_url}
+                )
+            clone_structural = self.structural_validator.compare(
+                original_content, rewritten_content
+            )
+            self._save_json("structural_validation_clone.json", clone_structural)
+
+            # ── Accuracy: Visual fidelity (live original vs. reconstruction) ──
+            # Screenshot and score the editable product; the clone is captured
+            # too but only as a diagnostic comparison, not as the score cap.
+            try:
+                original_screenshot_rel = viewport_results.get("desktop")
+                editable_screenshot_rel = await self._capture_reconstruction_screenshot(
+                    "output_editable.html", "capture_desktop_editable.png"
+                )
+                original_screenshot_path = (
+                    os.path.join(self.storage.current_run_dir, original_screenshot_rel)
+                    if original_screenshot_rel
+                    else None
+                )
+                if original_screenshot_path and editable_screenshot_rel:
+                    editable_path = os.path.join(
+                        self.storage.current_run_dir, editable_screenshot_rel
+                    )
+                    visual_result = self.visual_diff.compare_screenshots_normalized(
+                        original_screenshot_path,
+                        editable_path,
+                        ignore_mask=dynamic_mask,
+                    )
+                    self._save_json("visual_fidelity_report.json", visual_result)
+                    # Prefer SSIM (perceptual/structural) over raw pixel delta as
+                    # the score cap; fall back to pixel similarity if unavailable.
+                    visual_score = visual_result.get(
+                        "ssim_percent", visual_result.get("similarity_percent")
+                    )
+                    if visual_score is not None:
+                        self.scorer.record_visual_similarity(
+                            visual_score, {"url": page_url}
+                        )
+                # Per-breakpoint visual validation: the responsive capture
+                # claims to reproduce layout at the 768/480 breakpoints —
+                # verify by SSIM at those widths against the live originals.
+                # The desktop dynamic mask doesn't apply at other widths.
+                breakpoint_visuals: Dict[str, Any] = {}
+                for vp_name, vp_w, vp_h in (
+                    ("tablet", 768, 1024),
+                    ("mobile_small", 480, 860),
+                ):
+                    bp_original_rel = viewport_results.get(vp_name)
+                    if not bp_original_rel:
+                        continue
+                    bp_editable_rel = await self._capture_reconstruction_screenshot(
+                        "output_editable.html",
+                        f"capture_{vp_name}_editable.png",
+                        width=vp_w,
+                        height=vp_h,
+                    )
+                    if not bp_editable_rel:
+                        continue
+                    bp_result = self.visual_diff.compare_screenshots_normalized(
+                        os.path.join(self.storage.current_run_dir, bp_original_rel),
+                        os.path.join(self.storage.current_run_dir, bp_editable_rel),
+                    )
+                    bp_result["viewport_width"] = vp_w
+                    breakpoint_visuals[vp_name] = bp_result
+                if breakpoint_visuals:
+                    self._save_json(
+                        "visual_fidelity_breakpoints.json", breakpoint_visuals
+                    )
+                    bp_scores = {
+                        name: score
+                        for name, res in breakpoint_visuals.items()
+                        if (
+                            score := res.get(
+                                "ssim_percent", res.get("similarity_percent")
+                            )
+                        )
+                        is not None
+                    }
+                    self.scorer.record_responsive_visual_similarity(
+                        bp_scores, {"url": page_url}
+                    )
+
+                # Diagnostic: pixel fidelity of the high-fidelity clone.
+                clone_screenshot_rel = await self._capture_reconstruction_screenshot()
+                if original_screenshot_path and clone_screenshot_rel:
+                    clone_path = os.path.join(
+                        self.storage.current_run_dir, clone_screenshot_rel
+                    )
+                    clone_visual = self.visual_diff.compare_screenshots_normalized(
+                        original_screenshot_path,
+                        clone_path,
+                        ignore_mask=dynamic_mask,
+                    )
+                    self._save_json("visual_fidelity_clone_report.json", clone_visual)
+            except Exception as visual_err:
+                logger.warning(
+                    "visual_fidelity_check_failed", url=page_url, error=str(visual_err)
+                )
+                self.scorer.log_non_critical_error(
+                    "Visual fidelity check failed",
+                    {"url": page_url, "error": str(visual_err)},
+                )
 
         except Exception as e:
             result["errors"].append(str(e))
-            self.scorer.log_non_critical_error("Page processing error", {"url": page_url, "error": str(e)})
+            self.scorer.log_non_critical_error(
+                "Page processing error", {"url": page_url, "error": str(e)}
+            )
         finally:
             self.coordinator.release_lock(page_lock)
 
         return result
+
+    async def _capture_reconstruction_screenshot(
+        self,
+        source: str = "index.html",
+        out_name: str = "capture_desktop_reconstruction.png",
+        width: int = 1920,
+        height: int = 1080,
+    ) -> Optional[str]:
+        """
+        Renders a locally saved reconstruction file (``index.html`` clone or
+        ``output_editable.html`` product) at the given viewport and
+        screenshots it, so it can be pixel-diffed against the live original's
+        capture at the same width. Returns the run-relative path or None.
+        """
+        source_path = os.path.join(self.storage.current_run_dir, source)
+        if not os.path.exists(source_path):
+            return None
+
+        file_url = "file://" + os.path.abspath(source_path).replace(os.sep, "/")
+        recon_page = await self.browser.context.new_page()  # type: ignore[union-attr]
+        try:
+            await recon_page.set_viewport_size({"width": width, "height": height})
+            await recon_page.goto(file_url, wait_until="networkidle", timeout=30000)
+            await recon_page.wait_for_timeout(500)
+            screenshot = await recon_page.screenshot(full_page=True)
+
+            screenshot_path = os.path.join(self.storage.get_asset_path(), out_name)
+            with open(screenshot_path, "wb") as f:
+                f.write(screenshot)
+            return f"assets/{out_name}"
+        finally:
+            await recon_page.close()
 
     def _run_template_ecosystem(self, url: str, template_id: str) -> None:
         """Phase 6: Template registry, tokens, versioning, preview."""
@@ -437,13 +860,16 @@ class ExecutionRouter:
 
         # Register in registry
         self.template_registry.register(
-            template_id, url,
+            template_id,
+            url,
             tags=["auto-extracted", "web-reconstruction"],
             metadata={"source": "wire_pipeline"},
         )
 
         # Save design tokens
-        design_file = os.path.join(self.storage.current_run_dir, "design_architecture.json")
+        design_file = os.path.join(
+            self.storage.current_run_dir, "design_architecture.json"
+        )
         if os.path.exists(design_file):
             with open(design_file, "r") as f:
                 tokens = json.load(f)
@@ -454,7 +880,11 @@ class ExecutionRouter:
 
             # Generate preview
             preview_html = self.preview.render_preview(
-                {"components": [{"id": "root", "tag": "div", "content": f"Preview of {url}"}]},
+                {
+                    "components": [
+                        {"id": "root", "tag": "div", "content": f"Preview of {url}"}
+                    ]
+                },
                 tokens,
             )
             preview_path = os.path.join(self.storage.current_run_dir, "preview.html")
@@ -475,9 +905,9 @@ class ExecutionRouter:
 
         # Step 1: Classify sections
         classifications = self._section_classifier.classify_tree(cids.root)
-        self._save_json("section_classifications.json", [
-            c.model_dump() for c in classifications
-        ])
+        self._save_json(
+            "section_classifications.json", [c.model_dump() for c in classifications]
+        )
 
         # Step 2: Compile form schema (includes placeholder detection per field)
         form_schema = self._form_compiler.compile(
@@ -514,7 +944,9 @@ class ExecutionRouter:
         with open(filepath, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=2, default=str)
 
-    def remove_sections(self, run_id: str, section_node_paths: List[str]) -> RemovalResult:
+    def remove_sections(
+        self, run_id: str, section_node_paths: List[str]
+    ) -> RemovalResult:
         """
         Phase 8 layout mutation API.
         Applies section removals, validates mutated tree, and if valid,
@@ -533,10 +965,10 @@ class ExecutionRouter:
 
         with open(cids_path, "r", encoding="utf-8") as f:
             cids_data = json.load(f)
-        
+
         cids = CanonicalDesignSchema.model_validate(cids_data)
 
-        plans = []
+        plans: List[Any] = []
         current_root = cids.root
 
         # 2. Sequentially apply removals and planning
@@ -544,34 +976,44 @@ class ExecutionRouter:
             try:
                 plan = self._removal_planner.plan(current_root, path)
                 mutated_root = self._reflow_engine.execute(current_root, plan)
-                
+
                 # Validate the step
-                report = self._integrity_validator.validate(current_root, mutated_root, path)
-                
+                report = self._integrity_validator.validate(
+                    current_root, mutated_root, path
+                )
+
                 if not report.passed:
-                    logger.warning("remove_sections_validation_failed", path=path, violations=len(report.violations))
+                    logger.warning(
+                        "remove_sections_validation_failed",
+                        path=path,
+                        violations=len(report.violations),
+                    )
                     return RemovalResult(
                         mutated_root=mutated_root,
                         plans=plans + [plan],
                         integrity_report=report,
                         recompilation_triggered=False,
                     )
-                
+
                 current_root = mutated_root
                 plans.append(plan)
             except Exception as e:
-                logger.error("remove_sections_error_during_step", path=path, error=str(e))
+                logger.error(
+                    "remove_sections_error_during_step", path=path, error=str(e)
+                )
                 # Return report with planning/execution error
                 return RemovalResult(
                     mutated_root=current_root,
                     plans=plans,
                     integrity_report=IntegrityReport(
                         passed=False,
-                        violations=[IntegrityViolation(
-                            node_path=path,
-                            rule="planning_or_execution_error",
-                            detail=str(e)
-                        )]
+                        violations=[
+                            IntegrityViolation(
+                                node_path=path,
+                                rule="planning_or_execution_error",
+                                detail=str(e),
+                            )
+                        ],
                     ),
                     recompilation_triggered=False,
                 )
@@ -585,7 +1027,9 @@ class ExecutionRouter:
 
         # Re-run Phase 5 compilers
         react_output = self.react_adapter.compile(cids)
-        with open(os.path.join(run_dir, "output_react.jsx"), "w", encoding="utf-8") as f:
+        with open(
+            os.path.join(run_dir, "output_react.jsx"), "w", encoding="utf-8"
+        ) as f:
             f.write(react_output)
 
         vue_output = self.vue_adapter.compile(cids)
@@ -598,7 +1042,9 @@ class ExecutionRouter:
         # Build combined final integrity report
         final_report = IntegrityReport(passed=True, violations=[])
 
-        logger.info("remove_sections_completed_successfully", run_id=run_id, plans=len(plans))
+        logger.info(
+            "remove_sections_completed_successfully", run_id=run_id, plans=len(plans)
+        )
         return RemovalResult(
             mutated_root=cids.root,
             plans=plans,
@@ -649,56 +1095,58 @@ class ExecutionRouter:
         # Load Form Schema
         with open(form_schema_path, "r", encoding="utf-8") as f:
             form_schema_data = json.load(f)
-        
+
         # Determine Pydantic class to validate
-        from wire.schema.semantic_schema import WebsiteFormSchema
         from wire.schema.portfolio_schema import PortfolioFormSchema
+        from wire.schema.semantic_schema import WebsiteFormSchema
+
         if "portfolio_form_schema" in form_schema_path:
             form_schema = PortfolioFormSchema.model_validate(form_schema_data)
         else:
-            form_schema = WebsiteFormSchema.model_validate(form_schema_data)
+            form_schema = WebsiteFormSchema.model_validate(
+                form_schema_data
+            )  # type: ignore[assignment]
 
         # 2. Strict validation (hard block on failures)
-        validation_report = SubmissionValidator.validate(payload, form_schema, blueprint)
+        validation_report = SubmissionValidator.validate(
+            payload, form_schema, blueprint
+        )
         if not validation_report.is_valid:
-            logger.warning("generate_transformation_prompt_validation_failed", errors=len(validation_report.hard_failures))
+            logger.warning(
+                "generate_transformation_prompt_validation_failed",
+                errors=len(validation_report.hard_failures),
+            )
             return SubmissionResult(
                 success=False,
                 validation_report=validation_report,
-                transformation_prompt=None
+                transformation_prompt=None,
             )
 
-        # 3. Image Ingestion (decode, verify, Pillow re-encode, store)
+        # 3. Multi-modal ingestion (image, video, audio, document): decode,
+        #    verify, store, and replace the base64 value with a stored path.
         assets_dir = os.path.join(run_dir, "assets")
         try:
             for field_id, submitted_val in payload.field_values.items():
-                if isinstance(submitted_val, ImageValue) and submitted_val.value:
-                    processed = ImageIngestionPipeline.process(
-                        submitted_val.value,
-                        assets_dir
-                    )
-                    # Update in-place to the relative reference path
-                    submitted_val.value = processed["stored_path"]
-                elif isinstance(submitted_val, RepeatableGroupValue):
+                if isinstance(submitted_val, RepeatableGroupValue):
                     for instance in submitted_val.instances:
                         for f_id, val in instance.items():
-                            if isinstance(val, ImageValue) and val.value:
-                                processed = ImageIngestionPipeline.process(
-                                    val.value,
-                                    assets_dir
-                                )
-                                val.value = processed["stored_path"]
+                            self._ingest_submitted_value(val, assets_dir)
+                else:
+                    self._ingest_submitted_value(submitted_val, assets_dir)
         except Exception as e:
-            logger.error("image_ingestion_failed_during_substitution", error=str(e))
+            logger.error("ingestion_failed_during_substitution", error=str(e))
             # Fail closed on ingestion failure
             validation_report.is_valid = False
             validation_report.hard_failures.append(
-                ValidationItem(field_id="image_ingestion", message=f"Image ingestion processing failed: {str(e)}")
+                ValidationItem(
+                    field_id="media_ingestion",
+                    message=f"Media/document ingestion failed: {str(e)}",
+                )
             )
             return SubmissionResult(
                 success=False,
                 validation_report=validation_report,
-                transformation_prompt=None
+                transformation_prompt=None,
             )
 
         # 4. Substitution Mapping
@@ -716,13 +1164,9 @@ class ExecutionRouter:
 
         # 5. Transformation Prompt Generation (call LLM summarizing only)
         self._llm_guard.reset_call_count()
-        
+
         prompt = TransformationPromptGenerator.generate(
-            cids.root,
-            substitutions,
-            cids.url,
-            self._llm_guard,
-            design_tokens
+            cids.root, substitutions, cids.url, self._llm_guard, design_tokens
         )
 
         # 6. Save prompt output to run directory
@@ -730,11 +1174,195 @@ class ExecutionRouter:
         with open(prompt_output_path, "w", encoding="utf-8") as f:
             f.write(prompt.model_dump_json(indent=2))
 
-        logger.info("generate_transformation_prompt_completed_successfully", run_id=run_id)
+        logger.info(
+            "generate_transformation_prompt_completed_successfully", run_id=run_id
+        )
         return SubmissionResult(
             success=True,
             validation_report=validation_report,
-            transformation_prompt=prompt
+            transformation_prompt=prompt,
         )
 
+    def evaluate_repurpose(
+        self, run_id: str, payload: SubmissionPayload
+    ) -> RepurposeReport:
+        """Phase-0: actually apply a content payload to a stored run and score it.
 
+        Loads the run's CIDS + form schema, applies the substitutions, recompiles
+        the repurposed page to ``substituted_editable.html``, and writes an honest
+        ``repurpose_report.json`` (slot fill, content presence, structural
+        integrity vs. the original editable output). This is the measurement that
+        tells us whether the *product* — repurposing a layout with your own
+        content — actually works, independent of reconstruction fidelity.
+        """
+        logger.info("evaluate_repurpose_started", run_id=run_id)
+        run_dir = os.path.join(self.storage.base_dir, run_id)
+        cids_path = os.path.join(run_dir, "schema_cids.json")
+        if not os.path.exists(cids_path):
+            raise ValueError(f"CIDS schema not found: {cids_path}")
+
+        form_schema_path = os.path.join(run_dir, "website_form_schema.json")
+        if not os.path.exists(form_schema_path):
+            form_schema_path = os.path.join(run_dir, "portfolio_form_schema.json")
+            if not os.path.exists(form_schema_path):
+                raise ValueError("No form schema found in run directory.")
+
+        with open(cids_path, "r", encoding="utf-8") as f:
+            cids = CanonicalDesignSchema.model_validate(json.load(f))
+
+        from wire.schema.portfolio_schema import PortfolioFormSchema
+        from wire.schema.semantic_schema import WebsiteFormSchema
+
+        with open(form_schema_path, "r", encoding="utf-8") as f:
+            form_schema_data = json.load(f)
+        form_schema: Any = (
+            PortfolioFormSchema.model_validate(form_schema_data)
+            if "portfolio_form_schema" in form_schema_path
+            else WebsiteFormSchema.model_validate(form_schema_data)
+        )
+
+        original_html: Optional[str] = None
+        original_path = os.path.join(run_dir, "output_editable.html")
+        if os.path.exists(original_path):
+            with open(original_path, "r", encoding="utf-8") as f:
+                original_html = f.read()
+
+        report, substituted_html = RepurposeEvaluator().evaluate(
+            cids, form_schema, payload, original_html=original_html
+        )
+        with open(
+            os.path.join(run_dir, "substituted_editable.html"), "w", encoding="utf-8"
+        ) as f:
+            f.write(substituted_html)
+        with open(
+            os.path.join(run_dir, "repurpose_report.json"), "w", encoding="utf-8"
+        ) as f:
+            f.write(report.model_dump_json(indent=2))
+        logger.info(
+            "evaluate_repurpose_completed",
+            run_id=run_id,
+            success_percent=report.success_percent,
+        )
+        return report
+
+    @staticmethod
+    def _ingest_submitted_value(val: Any, assets_dir: str) -> None:
+        """Dispatch a single submitted value to the right ingestion pipeline,
+        replacing its base64 payload with a stored run-relative path in place."""
+        if not getattr(val, "value", None):
+            return
+        if isinstance(val, ImageValue):
+            processed = ImageIngestionPipeline.process(
+                val.value,
+                assets_dir,
+                original_filename=getattr(val, "original_filename", ""),
+            )
+            val.value = processed["stored_path"]
+            # Carry derived understanding for accessible, well-fitted substitution.
+            val.alt_text = processed.get("alt_text")
+            val.dominant_color = processed.get("dominant_color")
+            val.width = processed.get("width")
+            val.height = processed.get("height")
+        elif isinstance(val, VideoValue):
+            processed = MediaIngestionPipeline.process(
+                val.value, assets_dir, kind="video"
+            )
+            val.value = processed["stored_path"]
+        elif isinstance(val, AudioValue):
+            processed = MediaIngestionPipeline.process(
+                val.value, assets_dir, kind="audio"
+            )
+            val.value = processed["stored_path"]
+        elif isinstance(val, DocumentValue):
+            processed = DocumentIngestionPipeline.process(
+                val.value, assets_dir, original_filename=val.original_filename
+            )
+            val.value = processed["stored_path"]
+            # Preserve extracted text + structure so substitution/prompt can use
+            # the right piece (title/summary/headings) rather than the whole blob.
+            val.extracted_text = processed.get("extracted_text")
+            val.extracted_structure = processed.get("structure")
+
+    def apply_brand(self, run_id: str, brand_tokens: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Brand-transfer API: apply a brand's design tokens (colors) onto a stored
+        run's CIDS layout, preserving structure. Remaps the run's own palette to
+        the brand palette by shared token role, recompiles all outputs
+        (editable HTML / React / Vue), and saves a new template version.
+
+        Args:
+            run_id: The stored run directory to restyle.
+            brand_tokens: A design-tokens dict (at least ``{"colors": {...}}``)
+                whose palette should be applied onto the layout.
+
+        Returns:
+            A summary dict with the number of colors remapped and the outputs
+            regenerated.
+        """
+        logger.info("apply_brand_started", run_id=run_id)
+
+        run_dir = os.path.join(self.storage.base_dir, run_id)
+        if not os.path.exists(run_dir):
+            raise ValueError(f"Run directory not found: {run_dir}")
+
+        cids_path = os.path.join(run_dir, "schema_cids.json")
+        if not os.path.exists(cids_path):
+            raise ValueError(f"CIDS schema not found: {cids_path}")
+
+        with open(cids_path, "r", encoding="utf-8") as f:
+            cids = CanonicalDesignSchema.model_validate(json.load(f))
+
+        # The run's own palette is the "from" side of the swap.
+        from_tokens: Dict[str, Any] = {"colors": dict(cids.tokens.colors)}
+        design_arch_path = os.path.join(run_dir, "design_architecture.json")
+        if os.path.exists(design_arch_path):
+            try:
+                with open(design_arch_path, "r", encoding="utf-8") as f:
+                    arch = json.load(f)
+                if isinstance(arch.get("colors"), dict) and arch["colors"]:
+                    from_tokens = {"colors": arch["colors"]}
+            except Exception:
+                pass
+
+        remap = self.token_system._build_remap(
+            from_tokens.get("colors", {}), (brand_tokens or {}).get("colors", {})
+        )
+        cids.root = self.token_system.apply_palette(
+            cids.root, brand_tokens or {}, from_tokens
+        )
+        # Reflect the new brand palette in the schema's token block too.
+        if (brand_tokens or {}).get("colors"):
+            cids.tokens.colors = dict(brand_tokens["colors"])
+
+        # Persist the restyled CIDS and recompile every output.
+        with open(cids_path, "w", encoding="utf-8") as f:
+            f.write(cids.model_dump_json(indent=2))
+
+        outputs = []
+        editable_html = self.html_compiler.compile_document(cids)
+        with open(
+            os.path.join(run_dir, "output_editable.html"), "w", encoding="utf-8"
+        ) as f:
+            f.write(editable_html)
+        outputs.append("output_editable.html")
+
+        with open(
+            os.path.join(run_dir, "output_react.jsx"), "w", encoding="utf-8"
+        ) as f:
+            f.write(self.react_adapter.compile(cids))
+        outputs.append("output_react.jsx")
+
+        with open(os.path.join(run_dir, "output_vue.vue"), "w", encoding="utf-8") as f:
+            f.write(self.vue_adapter.compile(cids))
+        outputs.append("output_vue.vue")
+
+        self.versioning.save_version(run_id, cids.model_dump())
+
+        logger.info("apply_brand_completed", run_id=run_id, colors_remapped=len(remap))
+        return {
+            "success": True,
+            "run_id": run_id,
+            "colors_remapped": len(remap),
+            "recompilation_triggered": True,
+            "outputs": outputs,
+        }

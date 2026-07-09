@@ -1,5 +1,7 @@
-import pytest
 from unittest.mock import AsyncMock, MagicMock
+
+import pytest
+
 from wire.agents.exploration.region_probe import RegionProbe
 
 

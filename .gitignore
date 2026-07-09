@@ -6,6 +6,7 @@ __pycache__/
 .ruff_cache/
 .coverage
 output/
+corpus_output/
 .env
 dist/
 build/
@@ -14,6 +15,6 @@ node_modules/
 *.db
 *.wire
 desktop.ini
-templates/
+/templates/
 test-results/
 playwright-report/

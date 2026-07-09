@@ -18,30 +18,27 @@ hit the actual Gemini API (skipped by default, run with
 """
 
 import os
-import json
-import pytest
-from unittest.mock import MagicMock, patch
 from typing import Optional
+
+import pytest
 
 from wire.schema.canonical import ComponentNode
 from wire.schema.semantic_schema import (
-    SectionRole,
-    ContentState,
-    FormFieldType,
-    ClassifiedSection,
-    PlaceholderResult,
-    FormField,
-    WebsiteFormSchema,
     CLASSIFICATION_CONFIDENCE_THRESHOLD,
+    ContentState,
+    FormField,
+    FormFieldType,
+    SectionRole,
+    WebsiteFormSchema,
 )
-from wire.semantic.llm_guard import LLMGuard
-from wire.semantic.llm_client import LLMClient
-from wire.semantic.section_classifier import SectionClassifier
-from wire.semantic.placeholder_detector import PlaceholderDetector
 from wire.semantic.intent_reconciler import IntentReconciler
-
+from wire.semantic.llm_client import LLMClient
+from wire.semantic.llm_guard import LLMGuard
+from wire.semantic.placeholder_detector import PlaceholderDetector
+from wire.semantic.section_classifier import SectionClassifier
 
 # ── Helpers ─────────────────────────────────────────────────────────────
+
 
 def _make_node(tag, attrs=None, text=None, children=None, slot_id=None):
     return ComponentNode(
@@ -78,10 +75,12 @@ class MockLLMClient:
         user_content: str,
         temperature: float = 0.1,
     ) -> Optional[dict]:
-        self._call_log.append({
-            "system_instruction": system_instruction[:50],
-            "user_content": user_content[:100],
-        })
+        self._call_log.append(
+            {
+                "system_instruction": system_instruction[:50],
+                "user_content": user_content[:100],
+            }
+        )
         if self._responses:
             return self._responses.pop(0)
         return None
@@ -90,6 +89,7 @@ class MockLLMClient:
 # ═══════════════════════════════════════════════════════════════════════
 # 1. GENUINELY AMBIGUOUS SECTION CLASSIFICATION
 # ═══════════════════════════════════════════════════════════════════════
+
 
 class TestAmbiguousSectionClassification:
     """
@@ -100,33 +100,65 @@ class TestAmbiguousSectionClassification:
 
     def _ambiguous_section(self):
         """A div with mixed signals — could be about, services, or portfolio."""
-        return _make_node("div", {"class": "main-content section-3"}, children=[
-            _make_node("h2", text="What We Do Best"),
-            _make_node("div", {"class": "grid-layout"}, children=[
-                _make_node("div", {"class": "item"}, children=[
-                    _make_node("h3", text="UI Design"),
-                    _make_node("p", text="Crafting beautiful interfaces"),
-                ]),
-                _make_node("div", {"class": "item"}, children=[
-                    _make_node("h3", text="Web Development"),
-                    _make_node("p", text="Building scalable web applications"),
-                ]),
-            ]),
-        ])
+        return _make_node(
+            "div",
+            {"class": "main-content section-3"},
+            children=[
+                _make_node("h2", text="What We Do Best"),
+                _make_node(
+                    "div",
+                    {"class": "grid-layout"},
+                    children=[
+                        _make_node(
+                            "div",
+                            {"class": "item"},
+                            children=[
+                                _make_node("h3", text="UI Design"),
+                                _make_node("p", text="Crafting beautiful interfaces"),
+                            ],
+                        ),
+                        _make_node(
+                            "div",
+                            {"class": "item"},
+                            children=[
+                                _make_node("h3", text="Web Development"),
+                                _make_node(
+                                    "p", text="Building scalable web applications"
+                                ),
+                            ],
+                        ),
+                    ],
+                ),
+            ],
+        )
 
     def _deliberately_unclassifiable(self):
         """A section with absolutely no semantic signals."""
-        return _make_node("div", {"class": "block-7 fade-in"}, children=[
-            _make_node("div", {"class": "inner"}, children=[
-                _make_node("span", text="..."),
-            ]),
-        ])
+        return _make_node(
+            "div",
+            {"class": "block-7 fade-in"},
+            children=[
+                _make_node(
+                    "div",
+                    {"class": "inner"},
+                    children=[
+                        _make_node("span", text="..."),
+                    ],
+                ),
+            ],
+        )
 
     def test_ambiguous_section_llm_resolves_correctly(self):
         """LLM correctly classifies an ambiguous section as SERVICES."""
-        mock_client = MockLLMClient(responses=[
-            {"section_role": "services", "confidence": 0.88, "reasoning": "Grid layout with service descriptions"}
-        ])
+        mock_client = MockLLMClient(
+            responses=[
+                {
+                    "section_role": "services",
+                    "confidence": 0.88,
+                    "reasoning": "Grid layout with service descriptions",
+                }
+            ]
+        )
         guard = LLMGuard(llm_client=mock_client)
         classifier = SectionClassifier(guard)
 
@@ -141,9 +173,15 @@ class TestAmbiguousSectionClassification:
 
     def test_ambiguous_section_llm_returns_unknown_below_threshold(self):
         """LLM returns low confidence → section stays UNKNOWN."""
-        mock_client = MockLLMClient(responses=[
-            {"section_role": "services", "confidence": 0.45, "reasoning": "Maybe services but unclear"}
-        ])
+        mock_client = MockLLMClient(
+            responses=[
+                {
+                    "section_role": "services",
+                    "confidence": 0.45,
+                    "reasoning": "Maybe services but unclear",
+                }
+            ]
+        )
         guard = LLMGuard(llm_client=mock_client)
         classifier = SectionClassifier(guard)
 
@@ -157,9 +195,15 @@ class TestAmbiguousSectionClassification:
 
     def test_unclassifiable_section_llm_returns_unknown(self):
         """LLM correctly returns UNKNOWN for genuinely unclassifiable content."""
-        mock_client = MockLLMClient(responses=[
-            {"section_role": "unknown", "confidence": 0.30, "reasoning": "No identifiable content pattern"}
-        ])
+        mock_client = MockLLMClient(
+            responses=[
+                {
+                    "section_role": "unknown",
+                    "confidence": 0.30,
+                    "reasoning": "No identifiable content pattern",
+                }
+            ]
+        )
         guard = LLMGuard(llm_client=mock_client)
         classifier = SectionClassifier(guard)
 
@@ -176,9 +220,12 @@ class TestAmbiguousSectionClassification:
         guard = LLMGuard(llm_client=mock_client)
         classifier = SectionClassifier(guard)
 
-        root = _make_node("div", children=[
-            _make_node("nav", children=[_make_node("a", text="Home")]),
-        ])
+        root = _make_node(
+            "div",
+            children=[
+                _make_node("nav", children=[_make_node("a", text="Home")]),
+            ],
+        )
         result = classifier.classify_tree(root)
 
         assert result[0].section_role == SectionRole.NAVIGATION
@@ -190,6 +237,7 @@ class TestAmbiguousSectionClassification:
 # 2. GENUINELY FREE-FORM INTENT EXTRACTION
 # ═══════════════════════════════════════════════════════════════════════
 
+
 class TestFreeFormIntentExtraction:
     """
     Tests with intent text that does NOT match keyword heuristics.
@@ -198,41 +246,64 @@ class TestFreeFormIntentExtraction:
 
     def test_complex_intent_no_keywords(self):
         """Intent that doesn't contain any keyword heuristic triggers."""
-        mock_client = MockLLMClient(responses=[
-            {
-                "user_role_domain": "independent ceramics artist",
-                "sections_to_emphasize": ["portfolio", "about", "contact"],
-                "sections_to_deprioritize": [],
-                "sections_to_exclude": ["pricing", "blog_feed"],
-                "explicit_field_overrides": [],
-            }
-        ])
+        mock_client = MockLLMClient(
+            responses=[
+                {
+                    "user_role_domain": "independent ceramics artist",
+                    "sections_to_emphasize": ["portfolio", "about", "contact"],
+                    "sections_to_deprioritize": [],
+                    "sections_to_exclude": ["pricing", "blog_feed"],
+                    "explicit_field_overrides": [],
+                }
+            ]
+        )
         guard = LLMGuard(llm_client=mock_client)
         reconciler = IntentReconciler(guard)
 
         schema = WebsiteFormSchema(
             source_url="https://test.com",
-            sections=[SectionRole.HERO, SectionRole.PORTFOLIO, SectionRole.PRICING, SectionRole.CONTACT],
+            sections=[
+                SectionRole.HERO,
+                SectionRole.PORTFOLIO,
+                SectionRole.PRICING,
+                SectionRole.CONTACT,
+            ],
             fields=[
                 FormField(
-                    field_id="hero_1", slot_id="s1", cids_node_path="root",
-                    label="Hero", field_type=FormFieldType.TEXT,
-                    section_role=SectionRole.HERO, required=True,
+                    field_id="hero_1",
+                    slot_id="s1",
+                    cids_node_path="root",
+                    label="Hero",
+                    field_type=FormFieldType.TEXT,
+                    section_role=SectionRole.HERO,
+                    required=True,
                 ),
                 FormField(
-                    field_id="portfolio_1", slot_id="s2", cids_node_path="root",
-                    label="Work", field_type=FormFieldType.TEXT,
-                    section_role=SectionRole.PORTFOLIO, required=True,
+                    field_id="portfolio_1",
+                    slot_id="s2",
+                    cids_node_path="root",
+                    label="Work",
+                    field_type=FormFieldType.TEXT,
+                    section_role=SectionRole.PORTFOLIO,
+                    required=True,
                 ),
                 FormField(
-                    field_id="pricing_1", slot_id="s3", cids_node_path="root",
-                    label="Price", field_type=FormFieldType.TEXT,
-                    section_role=SectionRole.PRICING, required=True,
+                    field_id="pricing_1",
+                    slot_id="s3",
+                    cids_node_path="root",
+                    label="Price",
+                    field_type=FormFieldType.TEXT,
+                    section_role=SectionRole.PRICING,
+                    required=True,
                 ),
                 FormField(
-                    field_id="contact_1", slot_id="s4", cids_node_path="root",
-                    label="Contact", field_type=FormFieldType.TEXT,
-                    section_role=SectionRole.CONTACT, required=True,
+                    field_id="contact_1",
+                    slot_id="s4",
+                    cids_node_path="root",
+                    label="Contact",
+                    field_type=FormFieldType.TEXT,
+                    section_role=SectionRole.CONTACT,
+                    required=True,
                 ),
             ],
         )
@@ -242,14 +313,16 @@ class TestFreeFormIntentExtraction:
             schema,
             "I throw pots and fire them in a wood kiln. I want to display my "
             "finished pieces and let collectors reach me, but I definitely "
-            "don't need any sort of rate card or journal entries."
+            "don't need any sort of rate card or journal entries.",
         )
 
         assert result.reconciliation_summary is not None
         assert mock_client.call_count >= 1
 
         # Pricing should be excluded (LLM extracted "pricing" from "rate card")
-        pricing_fields = [f for f in result.fields if f.section_role == SectionRole.PRICING]
+        pricing_fields = [
+            f for f in result.fields if f.section_role == SectionRole.PRICING
+        ]
         for f in pricing_fields:
             assert f.required is False
 
@@ -264,9 +337,13 @@ class TestFreeFormIntentExtraction:
             sections=[SectionRole.HERO, SectionRole.CONTACT],
             fields=[
                 FormField(
-                    field_id="hero_1", slot_id="s1", cids_node_path="root",
-                    label="Hero", field_type=FormFieldType.TEXT,
-                    section_role=SectionRole.HERO, required=True,
+                    field_id="hero_1",
+                    slot_id="s1",
+                    cids_node_path="root",
+                    label="Hero",
+                    field_type=FormFieldType.TEXT,
+                    section_role=SectionRole.HERO,
+                    required=True,
                 ),
             ],
         )
@@ -282,15 +359,22 @@ class TestFreeFormIntentExtraction:
 # 3. LLM GUARD AGAINST REAL (POSSIBLY MALFORMED) LLM OUTPUT
 # ═══════════════════════════════════════════════════════════════════════
 
+
 class TestLLMGuardLiveValidation:
     """Guard validation against realistic LLM outputs, not just stubs."""
 
     def test_retry_on_first_malformed_response(self):
         """First response is malformed, second is valid → succeeds."""
-        mock_client = MockLLMClient(responses=[
-            {"bad_key": "not a valid response"},  # First attempt: malformed
-            {"section_role": "about", "confidence": 0.85, "reasoning": "Contains bio text"},  # Retry: valid
-        ])
+        mock_client = MockLLMClient(
+            responses=[
+                {"bad_key": "not a valid response"},  # First attempt: malformed
+                {
+                    "section_role": "about",
+                    "confidence": 0.85,
+                    "reasoning": "Contains bio text",
+                },  # Retry: valid
+            ]
+        )
         guard = LLMGuard(llm_client=mock_client)
 
         node = _make_node("div", {"class": "info"}, text="About our company")
@@ -303,10 +387,12 @@ class TestLLMGuardLiveValidation:
 
     def test_fail_closed_after_two_malformed_responses(self):
         """Both attempts return malformed output → returns None."""
-        mock_client = MockLLMClient(responses=[
-            {"wrong": "structure"},
-            {"also": "wrong"},
-        ])
+        mock_client = MockLLMClient(
+            responses=[
+                {"wrong": "structure"},
+                {"also": "wrong"},
+            ]
+        )
         guard = LLMGuard(llm_client=mock_client)
 
         node = _make_node("div", text="Some content")
@@ -327,10 +413,12 @@ class TestLLMGuardLiveValidation:
 
     def test_placeholder_retry_succeeds(self):
         """Placeholder detection retries on malformed first response."""
-        mock_client = MockLLMClient(responses=[
-            {"bad": "output"},
-            {"is_likely_placeholder": True, "confidence": 0.90},
-        ])
+        mock_client = MockLLMClient(
+            responses=[
+                {"bad": "output"},
+                {"is_likely_placeholder": True, "confidence": 0.90},
+            ]
+        )
         guard = LLMGuard(llm_client=mock_client)
 
         result = guard.call_placeholder("Some generic text", "text")
@@ -339,16 +427,18 @@ class TestLLMGuardLiveValidation:
 
     def test_intent_retry_succeeds(self):
         """Intent extraction retries on malformed first response."""
-        mock_client = MockLLMClient(responses=[
-            {"garbage": True},
-            {
-                "user_role_domain": "photographer",
-                "sections_to_emphasize": ["portfolio"],
-                "sections_to_deprioritize": [],
-                "sections_to_exclude": [],
-                "explicit_field_overrides": [],
-            },
-        ])
+        mock_client = MockLLMClient(
+            responses=[
+                {"garbage": True},
+                {
+                    "user_role_domain": "photographer",
+                    "sections_to_emphasize": ["portfolio"],
+                    "sections_to_deprioritize": [],
+                    "sections_to_exclude": [],
+                    "explicit_field_overrides": [],
+                },
+            ]
+        )
         guard = LLMGuard(llm_client=mock_client)
 
         result = guard.call_intent("I'm a photographer showcasing my work")
@@ -357,16 +447,23 @@ class TestLLMGuardLiveValidation:
 
     def test_budget_enforcement_on_live_calls(self):
         """Call budget is enforced even when LLM client is available."""
-        mock_client = MockLLMClient(responses=[
-            {"section_role": "hero", "confidence": 0.90, "reasoning": "Hero section"}
-        ] * 10)
+        mock_client = MockLLMClient(
+            responses=[
+                {
+                    "section_role": "hero",
+                    "confidence": 0.90,
+                    "reasoning": "Hero section",
+                }
+            ]
+            * 10
+        )
 
         guard = LLMGuard(max_calls_per_run=2, llm_client=mock_client)
         node = _make_node("div", text="Content")
 
         # First two calls should work (each call_classification uses 1 prepare call)
-        r1 = guard.call_classification(node, "path1")
-        r2 = guard.call_classification(node, "path2")
+        guard.call_classification(node, "path1")
+        guard.call_classification(node, "path2")
 
         # Third call should be rejected by budget
         r3 = guard.call_classification(node, "path3")
@@ -386,14 +483,15 @@ class TestLLMGuardLiveValidation:
 # 4. PLACEHOLDER DETECTION WITH LLM FALLBACK
 # ═══════════════════════════════════════════════════════════════════════
 
+
 class TestPlaceholderLLMFallback:
     """Placeholder detection for ambiguous content that Layer 1 can't resolve."""
 
     def test_ambiguous_text_llm_detects_placeholder(self):
         """Text that looks real but is actually stock/template content."""
-        mock_client = MockLLMClient(responses=[
-            {"is_likely_placeholder": True, "confidence": 0.85}
-        ])
+        mock_client = MockLLMClient(
+            responses=[{"is_likely_placeholder": True, "confidence": 0.85}]
+        )
         guard = LLMGuard(llm_client=mock_client)
         detector = PlaceholderDetector(guard)
 
@@ -405,9 +503,9 @@ class TestPlaceholderLLMFallback:
 
     def test_ambiguous_text_llm_confirms_real(self):
         """Text that's short but actually real content."""
-        mock_client = MockLLMClient(responses=[
-            {"is_likely_placeholder": False, "confidence": 0.90}
-        ])
+        mock_client = MockLLMClient(
+            responses=[{"is_likely_placeholder": False, "confidence": 0.90}]
+        )
         guard = LLMGuard(llm_client=mock_client)
         detector = PlaceholderDetector(guard)
 
@@ -421,7 +519,9 @@ class TestPlaceholderLLMFallback:
         guard = LLMGuard(llm_client=mock_client)
         detector = PlaceholderDetector(guard)
 
-        result = detector.evaluate_field("Lorem ipsum dolor sit amet", FormFieldType.TEXT)
+        result = detector.evaluate_field(
+            "Lorem ipsum dolor sit amet", FormFieldType.TEXT
+        )
         assert result.is_placeholder is True
         assert mock_client.call_count == 0
 
@@ -429,6 +529,7 @@ class TestPlaceholderLLMFallback:
 # ═══════════════════════════════════════════════════════════════════════
 # 5. LIVE GEMINI API TESTS (skipped by default)
 # ═══════════════════════════════════════════════════════════════════════
+
 
 @pytest.mark.live_llm
 class TestLiveGeminiAPI:
@@ -450,25 +551,48 @@ class TestLiveGeminiAPI:
         classifier = SectionClassifier(guard)
 
         # Ambiguous section — no heuristic signals
-        root = _make_node("div", children=[
-            _make_node("div", {"class": "offerings-block"}, children=[
-                _make_node("h2", text="What We Offer"),
-                _make_node("div", {"class": "item"}, children=[
-                    _make_node("h3", text="Brand Strategy"),
-                    _make_node("p", text="We help define your brand identity and market position"),
-                ]),
-                _make_node("div", {"class": "item"}, children=[
-                    _make_node("h3", text="Visual Design"),
-                    _make_node("p", text="Creating cohesive visual systems for your brand"),
-                ]),
-            ]),
-        ])
+        root = _make_node(
+            "div",
+            children=[
+                _make_node(
+                    "div",
+                    {"class": "offerings-block"},
+                    children=[
+                        _make_node("h2", text="What We Offer"),
+                        _make_node(
+                            "div",
+                            {"class": "item"},
+                            children=[
+                                _make_node("h3", text="Brand Strategy"),
+                                _make_node(
+                                    "p",
+                                    text="We help define your brand identity and market position",
+                                ),
+                            ],
+                        ),
+                        _make_node(
+                            "div",
+                            {"class": "item"},
+                            children=[
+                                _make_node("h3", text="Visual Design"),
+                                _make_node(
+                                    "p",
+                                    text="Creating cohesive visual systems for your brand",
+                                ),
+                            ],
+                        ),
+                    ],
+                ),
+            ],
+        )
 
         result = classifier.classify_tree(root)
         assert len(result) == 1
         # LLM should classify this as SERVICES or FEATURE_GRID
         assert result[0].section_role in {
-            SectionRole.SERVICES, SectionRole.FEATURE_GRID, SectionRole.PORTFOLIO
+            SectionRole.SERVICES,
+            SectionRole.FEATURE_GRID,
+            SectionRole.PORTFOLIO,
         }
         assert result[0].confidence >= CLASSIFICATION_CONFIDENCE_THRESHOLD
         assert result[0].is_heuristic is False
@@ -496,8 +620,7 @@ class TestLiveGeminiAPI:
         guard = LLMGuard(llm_client=client)
 
         result = guard.call_placeholder(
-            "A great company with a great team doing great things",
-            "text"
+            "A great company with a great team doing great things", "text"
         )
 
         assert result is not None

@@ -1,5 +1,6 @@
-import structlog
 from typing import Any
+
+import structlog
 
 logger = structlog.get_logger(__name__)
 
@@ -10,7 +11,9 @@ class SemanticMerger:
     For single-node Phase 3, this operates on in-memory dicts.
     """
 
-    def merge_page_results(self, partial_results: list[dict[str, Any]]) -> dict[str, Any]:
+    def merge_page_results(
+        self, partial_results: list[dict[str, Any]]
+    ) -> dict[str, Any]:
         logger.info("merging_partial_results", count=len(partial_results))
         merged: dict[str, Any] = {
             "pages": [],
@@ -37,5 +40,7 @@ class SemanticMerger:
                 unique_assets.append(asset)
         merged["assets"] = unique_assets
 
-        logger.info("merge_complete", pages=len(merged["pages"]), assets=len(merged["assets"]))
+        logger.info(
+            "merge_complete", pages=len(merged["pages"]), assets=len(merged["assets"])
+        )
         return merged

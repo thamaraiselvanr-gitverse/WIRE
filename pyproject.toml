@@ -20,13 +20,41 @@ dependencies = [
     "python-multipart>=0.0.9",
     "sse-starlette>=2.0.0",
     "aiosqlite>=0.20.0",
-    "email-validator>=2.1.1"
+    "email-validator>=2.1.1",
+    "tinycss2>=1.2.1",
+    "lxml>=4.9.0",
+    "Pillow>=10.0.0",
+    "numpy>=1.26.0",
+    "google-genai>=1.0.0"
 ]
 
 [project.scripts]
 wire = "wire.main:main"
 
 [project.optional-dependencies]
+# PDF text extraction for document ingestion. Optional: without it, PDFs are
+# still accepted and stored, only their text is not extracted.
+documents = [
+    "pypdf>=4.0.0",
+]
+# PostgreSQL driver for production deployments. SQLite (via aiosqlite, already a
+# core dep) remains the zero-config default; set DATABASE_URL to a
+# postgresql+asyncpg://… URL to use Postgres.
+postgres = [
+    "asyncpg>=0.29.0",
+]
+# Error reporting. Sentry is initialized only when SENTRY_DSN is set; without
+# this extra (or the env var) the app runs unchanged. Metrics need no extra —
+# /api/metrics exposes in-process counters in Prometheus format.
+observability = [
+    "sentry-sdk>=2.0.0",
+]
+# Object-storage sync for run durability/DR. When WIRE_S3_BUCKET is set,
+# completed runs are mirrored to an S3-compatible bucket; without this extra
+# (or the env var) the pipeline runs unchanged against local disk.
+objectstore = [
+    "boto3>=1.34.0",
+]
 dev = [
     "pytest>=8.1.1",
     "pytest-asyncio>=0.23.6",
@@ -51,6 +79,14 @@ target-version = "py311"
 
 [tool.ruff.lint]
 select = ["E", "F", "I"]
+# Black owns line wrapping; E501 fires on long strings/URLs/comments it can't
+# split, so defer line length to Black rather than double-reporting it.
+ignore = ["E501"]
+
+[tool.ruff.lint.per-file-ignores]
+# canonical.py intentionally defines the Pydantic models before importing the
+# compiler sanitizer to avoid a circular import at module load.
+"wire/schema/canonical.py" = ["E402"]
 
 [tool.mypy]
 python_version = "3.11"
@@ -58,6 +94,22 @@ strict = true
 warn_return_any = true
 warn_unused_configs = true
 disallow_untyped_defs = true
+
+# Third-party packages that ship no type information; treat their symbols as
+# Any rather than erroring on every import/use.
+[[tool.mypy.overrides]]
+module = [
+    "jose",
+    "pypdf",
+    "tinycss2",
+    "sse_starlette",
+    "sse_starlette.*",
+    "google.genai",
+    "google.genai.*",
+    "sentry_sdk",
+    "boto3",
+]
+ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

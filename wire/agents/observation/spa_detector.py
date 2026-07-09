@@ -1,3 +1,5 @@
+from typing import Any, Dict
+
 import structlog
 from playwright.async_api import Page
 
@@ -10,7 +12,7 @@ class SPADetector:
     Identifies React, Vue, Angular, Svelte, Next.js, Nuxt, and other frameworks.
     """
 
-    async def detect(self, page: Page) -> dict:
+    async def detect(self, page: Page) -> Dict[str, Any]:
         logger.info("detecting_spa_framework")
 
         result = await page.evaluate("""
@@ -105,4 +107,4 @@ class SPADetector:
             framework=result["framework"],
             signals=len(result["signals"]),
         )
-        return result
+        return result  # type: ignore[no-any-return]
