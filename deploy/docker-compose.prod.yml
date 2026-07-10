@@ -1,0 +1,55 @@
+# Production overlay: adds TLS termination (Caddy) and builds+serves the
+# React dashboard, on top of the base stack (Postgres, Redis, API, worker).
+#
+# Usage (from deploy/):
+#   docker compose --env-file ../.env \
+#       -f docker-compose.yml -f docker-compose.prod.yml up -d --build
+#
+# Requires in ../.env: WIRE_DOMAIN (your public hostname), JWT_SECRET_KEY,
+# POSTGRES_PASSWORD, and WIRE_CORS_ORIGINS=https://${WIRE_DOMAIN}. DNS for
+# WIRE_DOMAIN must point at this host and ports 80/443 must be open.
+
+services:
+  # One-shot: build the frontend with the public API base URL baked in, and
+  # drop the static bundle into a volume Caddy serves.
+  frontend-build:
+    image: node:20-alpine
+    working_dir: /app
+    environment:
+      # Same-origin: the dashboard calls https://$WIRE_DOMAIN/api, which Caddy
+      # proxies to the API service.
+      VITE_API_BASE_URL: https://${WIRE_DOMAIN}/api
+    volumes:
+      - ../frontend:/app
+      - frontend-dist:/app/dist
+    command: sh -c "npm ci && npm run build"
+    restart: "no"
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      WIRE_DOMAIN: ${WIRE_DOMAIN:?set WIRE_DOMAIN in .env}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - frontend-dist:/srv/frontend:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      api:
+        condition: service_healthy
+      frontend-build:
+        condition: service_completed_successfully
+
+  # Behind Caddy the API no longer needs a published port; expose only to the
+  # internal network. (Override the base stack's host port binding.)
+  api:
+    ports: []
+
+volumes:
+  frontend-dist:
+  caddy-data:
+  caddy-config:

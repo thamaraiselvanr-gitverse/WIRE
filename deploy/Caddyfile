@@ -1,0 +1,25 @@
+# Caddy reverse proxy for the WIRE platform.
+#
+# Serves the built React dashboard as static files and proxies API calls to
+# the FastAPI service. Because the frontend and API share one origin
+# (https://$WIRE_DOMAIN), the browser makes same-origin requests — no CORS
+# needed. Caddy obtains and renews a Let's Encrypt certificate automatically
+# for $WIRE_DOMAIN (ports 80/443 must be reachable and DNS must point here).
+
+{$WIRE_DOMAIN} {
+	encode gzip
+
+	# API → FastAPI service. The app's routes already live under /api, so the
+	# path is forwarded unchanged (e.g. /api/status → api:8000/api/status).
+	handle /api/* {
+		reverse_proxy api:8000
+	}
+
+	# Everything else → the static dashboard. try_files falls back to
+	# index.html so client-side routes (/dashboard, /login) resolve.
+	handle {
+		root * /srv/frontend
+		try_files {path} /index.html
+		file_server
+	}
+}
