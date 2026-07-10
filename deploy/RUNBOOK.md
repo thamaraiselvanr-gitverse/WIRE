@@ -4,6 +4,47 @@ Everything here assumes the `deploy/docker-compose.yml` stack (Postgres +
 Redis + API + workers) or an equivalent topology. Commands are run from
 `deploy/` unless noted.
 
+## Public deployment (VM + domain + TLS + dashboard)
+
+To serve the platform to real users on `https://your-domain`, add the
+production overlay (`docker-compose.prod.yml`), which puts **Caddy** in front
+(automatic Let's Encrypt TLS), builds the **React dashboard**, and serves it
+same-origin with the API.
+
+**Prerequisites**
+1. A Linux VM with Docker + Docker Compose, ports **80** and **443** open.
+2. A domain's DNS **A record** pointing at the VM's public IP.
+3. `../.env` filled in — at minimum:
+   ```
+   WIRE_DOMAIN=your-domain.com
+   JWT_SECRET_KEY=<python -c "import secrets; print(secrets.token_urlsafe(48))">
+   POSTGRES_PASSWORD=<strong random>
+   WIRE_CORS_ORIGINS=https://your-domain.com
+   WIRE_ENABLE_HSTS=1
+   ```
+
+**Deploy**
+```bash
+cd deploy
+docker compose --env-file ../.env \
+    -f docker-compose.yml -f docker-compose.prod.yml up -d --build
+```
+Caddy issues the certificate on first request (may take ~30s). Then
+`https://your-domain.com` serves the dashboard and `https://your-domain.com/api`
+is the API. The API's own port is no longer published — only Caddy is exposed.
+
+**Firewall (recommended):** allow only 22/80/443; the API (8000), Postgres,
+and Redis stay on the internal Docker network.
+
+**Update the dashboard/API after a code change:**
+```bash
+git pull
+docker compose --env-file ../.env \
+    -f docker-compose.yml -f docker-compose.prod.yml up -d --build
+```
+(`frontend-build` re-bakes `VITE_API_BASE_URL=https://$WIRE_DOMAIN/api` into the
+bundle each build.)
+
 ## Start / stop / scale
 
 ```bash

@@ -12,7 +12,7 @@ WORKDIR /app
 # Install the package first (leverages layer caching for deps).
 COPY pyproject.toml README.md ./
 COPY wire ./wire
-RUN pip install --upgrade pip && pip install .
+RUN pip install --upgrade pip && pip install ".[postgres,observability,objectstore]"
 
 # Migrations ship in the image so `alembic upgrade head` runs in-container
 # (the compose stack runs it as a one-shot step before the API starts).
@@ -24,8 +24,13 @@ COPY migrations ./migrations
 RUN playwright install --with-deps chromium \
     && chmod -R a+rX /opt/pw-browsers
 
-# Run as an unprivileged user.
-RUN useradd --create-home --uid 10001 wire
+# Run as an unprivileged user. Create the runtime write paths (templates
+# cache, output artifacts) and hand /app to that user so the pipeline can
+# write them — otherwise the process (uid 10001) can't create dirs under the
+# root-owned /app.
+RUN useradd --create-home --uid 10001 wire \
+    && mkdir -p /app/templates /app/output \
+    && chown -R wire:wire /app
 USER wire
 
 EXPOSE 8000
